@@ -30,3 +30,13 @@
 *.exe
 *.out
 *.app
+
+
+# Visual Studio noise
+.vs/
+*.vcxproj.user
+
+# Visual Studio build output
+Debug/
+Release/
+x64/
