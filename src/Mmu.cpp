@@ -28,7 +28,6 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 	if (addr == 0xFF01) //TODO: implement serial. Stubbing serial output for now in order to read the results of blargg's test roms
 	{
 		std::cout << (char)val << std::flush;
-		return;
 	}
 
 	//TODO: this is not even close to right
@@ -37,7 +36,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 
 uint16_t Mmu::ReadWord(uint16_t addr)
 {
-	return (uint16_t)((ReadByte(addr+1) << 8) | ReadByte(addr)); //return the 16bit word at addr, flip from little endian to big endian
+	return (uint16_t)((ReadByte(addr + 1) << 8) | ReadByte(addr)); //return the 16bit word at addr, flip from little endian to big endian
 }
 
 void Mmu::WriteWord(uint16_t addr, uint16_t val)

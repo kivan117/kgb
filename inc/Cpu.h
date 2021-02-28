@@ -51,12 +51,19 @@ private:
 
 	void SetFlags(uint8_t OpA, uint8_t OpB, uint8_t inputCarryBit, bool subtraction, CARRYMODE carryMode);
 
+	void SyncFlagsFromReg();
+
 	void CalcCarry(uint8_t OpA, uint8_t OpB, uint8_t inputCarryBit, bool subtraction, CARRYMODE carryMode);
 
 	void CalcCarry16(uint16_t OpA, uint16_t OpB, uint8_t inputCarryBit, bool subtraction, CARRYMODE carryMode);
 
+	void TestBit(uint8_t Op, uint8_t bitNum);
+
+	uint8_t SetBit(uint8_t Op, uint8_t bitNum, bool enabled);
+
 	bool Halted{ false };
 	bool Stopped{ false };
+	bool InterruptsEnabled{ false }; // IME flag. Not mapped to memory
 
 	uint64_t CycleCounter{ 0 };
 	uint64_t OpsCounter{ 0 };

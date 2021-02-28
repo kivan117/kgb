@@ -13,6 +13,7 @@ Cpu::Cpu(Mmu* __mmu) : mmu(__mmu)
 		HL = 0x014D;
 		SP = 0xFFFE;
 		PC = 0x0100;
+		SyncFlagsFromReg();
 	}
 
 	//stub LY to 0x90 (line 144, begin VBlank)
@@ -32,11 +33,70 @@ void Cpu::Tick()
 		return;
 	}
 
+	//PrintCPUState();
+
+	bool IME_precheck = InterruptsEnabled;
+
 	uint8_t nextOp = mmu->ReadByte(PC);
 	PC += 1;
 	Execute(nextOp);
 
 	//handle interrupts
+	if (IME_precheck && InterruptsEnabled) //delau the effect of enabling IME by 1 operation
+	{
+		//FFFF - IE - interrupt enabled
+		//FF0F - IF - interrupt requested
+
+		//Bit 0: V-Blank  0x40
+		//Bit 1: LCD STAT 0x48
+		//Bit 2: Timer    0x50
+		//Bit 3: Serial   0x58
+		//Bit 4: Joypad   0x60
+
+		uint8_t REG_IE = mmu->ReadByte(0xFFFF);
+		uint8_t REG_IF = mmu->ReadByte(0xFF0F);
+
+		//if interrupts are enabled globally, and at least 1 interrupt is both enabled and requested
+		if (REG_IE & REG_IF & 0x1F) 
+		{
+			InterruptsEnabled = false;
+			CycleCounter += 20; //assuming interrupt handling process takes 20 cycles per z80 spec sheet / pan docs
+			
+			if (Halted)
+			{
+				Halted = false;
+				CycleCounter += 4;
+			}
+
+			Push(PC);
+
+			if (REG_IE & REG_IF & 0x1) //v-blank
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xFE)); //disable vblank bit in IF
+				PC = 0x40;
+			}
+			else if (REG_IE & REG_IF & 0x2) //lcd stat
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xFD)); //disable lcd stat bit in IF
+				PC = 0x48;
+			}
+			else if (REG_IE & REG_IF & 0x4) //timer
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xFB)); //disable timer bit in IF
+				PC = 0x50;
+			}
+			else if (REG_IE & REG_IF & 0x8) //serial
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xF7)); //disable serial bit in IF
+				PC = 0x58;
+			}
+			else if (REG_IE & REG_IF & 0x10) //joypad
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xEF)); //disable joypad bit in IF
+				PC = 0x60;
+			}
+		}
+	}
 
 	//PrintCPUState();
 }
@@ -147,6 +207,30 @@ void Cpu::SetFlags(uint8_t OpA, uint8_t OpB, uint8_t inputCarryBit, bool subtrac
 
 }
 
+void Cpu::SyncFlagsFromReg()
+{
+	flags.zero = ((Regs.F & 0x80) >> 7);
+	flags.negative = ((Regs.F & 0x40) >> 6);
+	flags.halfcarry = ((Regs.F & 0x20) >> 5);
+	flags.carry = ((Regs.F & 0x10) >> 4);
+}
+
+void Cpu::TestBit(uint8_t Op, uint8_t bitNum)
+{
+	SetZero((Op & (1 << bitNum)) == 0);
+	SetNeg(0);
+	SetHalfCarry(1);
+}
+
+uint8_t Cpu::SetBit(uint8_t Op, uint8_t bitNum, bool enabled)
+{
+	if (enabled)
+		return (Op | (1 << bitNum));
+
+	uint8_t temp = 1 << bitNum;
+	return Op & ~temp;
+}
+
 void Cpu::Execute(uint8_t op)
 {
 	OpsCounter++;
@@ -162,11 +246,50 @@ void Cpu::Execute(uint8_t op)
 	{
 	//Misc
 	case(0x00): break; //NOP
-	case(0xF3): break; //DI TODO: actually disable interrupts
+	case(0x10): Stopped = true; break;
+	case(0x76): Halted = true; break; //HALT
+	case(0xF3): InterruptsEnabled = false; break; //DI
+	case(0xFB): InterruptsEnabled = true;  break; //EI
 
 	//Rotate/Shift/Bitops
+
+	case(0x07): u8iv = Regs.A >> 7; Regs.A = Regs.A << 1; Regs.A |= u8iv; SetZero(0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RLCA
+	case(0x17): u8iv = Regs.A >> 7; Regs.A = Regs.A << 1; Regs.A |= (flags.carry ? 1 : 0); SetZero(0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RLA
 	case(0x0F): u8iv = Regs.A & 1; Regs.A = Regs.A >> 1; Regs.A |= ((u8iv ? 1 : 0) << 7);        SetZero(0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RRCA
 	case(0x1F): u8iv = Regs.A & 1; Regs.A = Regs.A >> 1; Regs.A |= ((flags.carry ? 1 : 0) << 7); SetZero(0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RRA
+
+	case(0x37): SetNeg(0); SetHalfCarry(0); SetCarry(1); break; //SCF
+	case(0x3F): SetNeg(0); SetHalfCarry(0); SetCarry(!flags.carry); break; //CCF
+	case(0x27): { //DAA
+		if (flags.negative)
+		{
+			if (flags.carry)
+			{
+				Regs.A -= 0x60;
+				SetCarry(1);
+			}
+			if (flags.halfcarry)
+			{
+				Regs.A -= 0x06;
+			}
+		}
+		else
+		{
+			if (flags.carry || Regs.A > 0x99)
+			{
+				Regs.A += 0x60;
+				SetCarry(1);
+			}
+			if (flags.halfcarry || ((Regs.A & 0x0F) > 0x09))
+			{
+				Regs.A += 0x06;
+			}
+		}
+		SetZero(Regs.A == 0);
+		SetHalfCarry(0);
+		break;
+	}
+	case(0x2F): Regs.A = ~Regs.A; SetNeg(1); SetHalfCarry(1); break; // CPL
 		
 	//Load/Store/Move 8-bit
 	case(0x02): mmu->WriteByte(BC, Regs.A); break; //LD (BC), A
@@ -280,68 +403,174 @@ void Cpu::Execute(uint8_t op)
 	case(0xD5): Push(DE); break;   //Push DE
 	case(0xE1): HL = Pop(); break; //Pop  HL
 	case(0xE5): Push(HL); break;   //Push HL
-	case(0xF1): AF = Pop(); break; //Pop  AF
+	case(0xF1): AF = (Pop() & 0xFFF0); SyncFlagsFromReg(); break; //Pop  AF
 	case(0xF5): Push(AF); break;   //Push AF
 
 	case(0x08): mmu->WriteWord(mmu->ReadWord(PC), SP); PC += 2; break; //LD (u16), SP
+
+	case(0xF8): i8iv = mmu->ReadByte(PC++); CalcCarry(SP, (uint16_t)i8iv, 0, false, CARRYMODE::BOTH); SetZero(0); SetNeg(0); HL = SP + i8iv; break; // LD HL, SP+i8
+
 	case(0xF9): SP = HL; break; //LD SP, HL
 
 	//ALU 8-bit
+	case(0x04): SetFlags(Regs.B, 1, 0, false, CARRYMODE::HALFCARRY); Regs.B++; break; //INC B
+	case(0x14): SetFlags(Regs.D, 1, 0, false, CARRYMODE::HALFCARRY); Regs.D++; break; //INC D
+	case(0x24): SetFlags(Regs.H, 1, 0, false, CARRYMODE::HALFCARRY); Regs.H++; break; //INC H
+	case(0x34): SetFlags(mmu->ReadByte(HL), 1, 0, false, CARRYMODE::HALFCARRY);  mmu->WriteByte(HL, mmu->ReadByte(HL) + 1); break; //INC (HL)
 
 	case(0x05): SetFlags(Regs.B, 1, 0, true,  CARRYMODE::HALFCARRY); Regs.B--; break; //DEC B
-	case(0x0D): SetFlags(Regs.C, 1, 0, true,  CARRYMODE::HALFCARRY); Regs.C--; break; //DEC C
-	case(0x14): SetFlags(Regs.D, 1, 0, false, CARRYMODE::HALFCARRY); Regs.D++; break; //INC D
+	case(0x15): SetFlags(Regs.D, 1, 0, true, CARRYMODE::HALFCARRY); Regs.D--; break; //DEC D
+	case(0x25): SetFlags(Regs.H, 1, 0, true, CARRYMODE::HALFCARRY); Regs.H--; break; //DEC H
+	case(0x35): SetFlags(mmu->ReadByte(HL), 1, 0, true, CARRYMODE::HALFCARRY);  mmu->WriteByte(HL, mmu->ReadByte(HL) - 1); break; //DEC (HL)
+	
+	case(0x0C): SetFlags(Regs.C, 1, 0, false, CARRYMODE::HALFCARRY); Regs.C++; break; //INC C
 	case(0x1C): SetFlags(Regs.E, 1, 0, false, CARRYMODE::HALFCARRY); Regs.E++; break; //INC E
-	case(0x1D): SetFlags(Regs.E, 1, 0, true,  CARRYMODE::HALFCARRY); Regs.E--; break; //DEC E
-	case(0x24): SetFlags(Regs.H, 1, 0, false, CARRYMODE::HALFCARRY); Regs.H++; break; //INC H
-	case(0x25): SetFlags(Regs.H, 1, 0, true,  CARRYMODE::HALFCARRY); Regs.H--; break; //DEC H
 	case(0x2C): SetFlags(Regs.L, 1, 0, false, CARRYMODE::HALFCARRY); Regs.L++; break; //INC L
-	case(0x2D): SetFlags(Regs.L, 1, 0, true,  CARRYMODE::HALFCARRY); Regs.L--; break; //DEC L
-	case(0x35): SetFlags(mmu->ReadByte(HL), 1, 0, true, CARRYMODE::HALFCARRY);  mmu->WriteByte(HL, mmu->ReadByte(HL)-1); break; //DEC (HL)
 	case(0x3C): SetFlags(Regs.A, 1, 0, false, CARRYMODE::HALFCARRY); Regs.A++; break; //INC A
+
+	case(0x0D): SetFlags(Regs.C, 1, 0, true,  CARRYMODE::HALFCARRY); Regs.C--; break; //DEC C
+	case(0x1D): SetFlags(Regs.E, 1, 0, true,  CARRYMODE::HALFCARRY); Regs.E--; break; //DEC E
+	case(0x2D): SetFlags(Regs.L, 1, 0, true,  CARRYMODE::HALFCARRY); Regs.L--; break; //DEC L
 	case(0x3D): SetFlags(Regs.A, 1, 0, true,  CARRYMODE::HALFCARRY); Regs.A--; break; //DEC A
 
-	case(0xC6): u8iv = mmu->ReadByte(PC++); SetFlags(Regs.A, u8iv, 0, false, CARRYMODE::BOTH); Regs.A += u8iv; break; // ADD A, u8
-	case(0xCE): u8iv = mmu->ReadByte(PC++); u16iv = flags.carry; SetFlags(Regs.A, u8iv, flags.carry, false, CARRYMODE::BOTH); Regs.A += u8iv + (uint8_t)u16iv; break; // ADC A, u8
+	case(0x80): SetFlags(Regs.A, Regs.B, 0, false, CARRYMODE::BOTH); Regs.A += Regs.B; break; //ADD A, B
+	case(0x81): SetFlags(Regs.A, Regs.C, 0, false, CARRYMODE::BOTH); Regs.A += Regs.C; break; //ADD A, C
+	case(0x82): SetFlags(Regs.A, Regs.D, 0, false, CARRYMODE::BOTH); Regs.A += Regs.D; break; //ADD A, D
+	case(0x83): SetFlags(Regs.A, Regs.E, 0, false, CARRYMODE::BOTH); Regs.A += Regs.E; break; //ADD A, E
+	case(0x84): SetFlags(Regs.A, Regs.H, 0, false, CARRYMODE::BOTH); Regs.A += Regs.H; break; //ADD A, H
+	case(0x85): SetFlags(Regs.A, Regs.L, 0, false, CARRYMODE::BOTH); Regs.A += Regs.L; break; //ADD A, L
+	case(0x86): u8iv = mmu->ReadByte(HL); SetFlags(Regs.A, u8iv, 0, false, CARRYMODE::BOTH); Regs.A += u8iv; break; //ADD A, (HL)
+	case(0x87): SetFlags(Regs.A, Regs.A, 0, false, CARRYMODE::BOTH); Regs.A += Regs.A; break; //ADD A, A
 
-	case(0xD6): u8iv = mmu->ReadByte(PC++); SetFlags(Regs.A, u8iv, 0, true, CARRYMODE::BOTH); Regs.A -= u8iv; break; // SUB A, u8
+	case(0x88): u8iv = flags.carry; SetFlags(Regs.A, Regs.B, u8iv, false, CARRYMODE::BOTH); Regs.A += Regs.B + u8iv; break; //ADC A, B
+	case(0x89): u8iv = flags.carry; SetFlags(Regs.A, Regs.C, u8iv, false, CARRYMODE::BOTH); Regs.A += Regs.C + u8iv; break; //ADC A, C
+	case(0x8A): u8iv = flags.carry; SetFlags(Regs.A, Regs.D, u8iv, false, CARRYMODE::BOTH); Regs.A += Regs.D + u8iv; break; //ADC A, D
+	case(0x8B): u8iv = flags.carry; SetFlags(Regs.A, Regs.E, u8iv, false, CARRYMODE::BOTH); Regs.A += Regs.E + u8iv; break; //ADC A, E
+	case(0x8C): u8iv = flags.carry; SetFlags(Regs.A, Regs.H, u8iv, false, CARRYMODE::BOTH); Regs.A += Regs.H + u8iv; break; //ADC A, H
+	case(0x8D): u8iv = flags.carry; SetFlags(Regs.A, Regs.L, u8iv, false, CARRYMODE::BOTH); Regs.A += Regs.L + u8iv; break; //ADC A, L
+	case(0x8E): u8iv = flags.carry; u16iv = mmu->ReadByte(HL); SetFlags(Regs.A, u16iv, u8iv, false, CARRYMODE::BOTH); Regs.A += u16iv + u8iv; break; //ADC A, (HL)
+	case(0x8F): u8iv = flags.carry; SetFlags(Regs.A, Regs.A, u8iv, false, CARRYMODE::BOTH); Regs.A += Regs.A + u8iv; break; //ADC A, A
 
-	case(0xB0): Regs.A |= Regs.B; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, B
-	case(0xB1): Regs.A |= Regs.C; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, C
-	case(0xB6): Regs.A |= mmu->ReadByte(HL); SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, (HL)
-	case(0xB7): Regs.A |= Regs.A; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, A
+	case(0x90): SetFlags(Regs.A, Regs.B, 0, true, CARRYMODE::BOTH); Regs.A -= Regs.B; break; //SUB A, B
+	case(0x91): SetFlags(Regs.A, Regs.C, 0, true, CARRYMODE::BOTH); Regs.A -= Regs.C; break; //SUB A, C
+	case(0x92): SetFlags(Regs.A, Regs.D, 0, true, CARRYMODE::BOTH); Regs.A -= Regs.D; break; //SUB A, D
+	case(0x93): SetFlags(Regs.A, Regs.E, 0, true, CARRYMODE::BOTH); Regs.A -= Regs.E; break; //SUB A, E
+	case(0x94): SetFlags(Regs.A, Regs.H, 0, true, CARRYMODE::BOTH); Regs.A -= Regs.H; break; //SUB A, H
+	case(0x95): SetFlags(Regs.A, Regs.L, 0, true, CARRYMODE::BOTH); Regs.A -= Regs.L; break; //SUB A, L
+	case(0x96): u8iv = mmu->ReadByte(HL); SetFlags(Regs.A, u8iv, 0, true, CARRYMODE::BOTH); Regs.A -= u8iv; break; //SUB A, (HL)
+	case(0x97): SetFlags(Regs.A, Regs.A, 0, true, CARRYMODE::BOTH); Regs.A -= Regs.A; break; //SUB A, A
 
+	case(0x98): u8iv = flags.carry; SetFlags(Regs.A, Regs.B, u8iv, true, CARRYMODE::BOTH); Regs.A -= Regs.B + u8iv; break; //SBC A, B
+	case(0x99): u8iv = flags.carry; SetFlags(Regs.A, Regs.C, u8iv, true, CARRYMODE::BOTH); Regs.A -= Regs.C + u8iv; break; //SBC A, C
+	case(0x9A): u8iv = flags.carry; SetFlags(Regs.A, Regs.D, u8iv, true, CARRYMODE::BOTH); Regs.A -= Regs.D + u8iv; break; //SBC A, D
+	case(0x9B): u8iv = flags.carry; SetFlags(Regs.A, Regs.E, u8iv, true, CARRYMODE::BOTH); Regs.A -= Regs.E + u8iv; break; //SBC A, E
+	case(0x9C): u8iv = flags.carry; SetFlags(Regs.A, Regs.H, u8iv, true, CARRYMODE::BOTH); Regs.A -= Regs.H + u8iv; break; //SBC A, H
+	case(0x9D): u8iv = flags.carry; SetFlags(Regs.A, Regs.L, u8iv, true, CARRYMODE::BOTH); Regs.A -= Regs.L + u8iv; break; //SBC A, L
+	case(0x9E): u8iv = flags.carry; u16iv = mmu->ReadByte(HL); SetFlags(Regs.A, u16iv, u8iv, true, CARRYMODE::BOTH); Regs.A -= u16iv + u8iv; break; //SBC A, (HL)
+	case(0x9F): u8iv = flags.carry; SetFlags(Regs.A, Regs.A, u8iv, true, CARRYMODE::BOTH); Regs.A -= Regs.A + u8iv; break; //SBC A, A
+
+	case(0xA0): Regs.A = Regs.A & Regs.B; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(1); SetCarry(0); break; // AND A, B
+	case(0xA1): Regs.A = Regs.A & Regs.C; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(1); SetCarry(0); break; // AND A, C
+	case(0xA2): Regs.A = Regs.A & Regs.D; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(1); SetCarry(0); break; // AND A, D
+	case(0xA3): Regs.A = Regs.A & Regs.E; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(1); SetCarry(0); break; // AND A, E
+	case(0xA4): Regs.A = Regs.A & Regs.H; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(1); SetCarry(0); break; // AND A, H
+	case(0xA5): Regs.A = Regs.A & Regs.L; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(1); SetCarry(0); break; // AND A, L
+	case(0xA6): u8iv = mmu->ReadByte(HL); Regs.A = Regs.A & u8iv; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(1); SetCarry(0); break; //AND A, (HL)
+	case(0xA7): Regs.A = Regs.A & Regs.A; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(1); SetCarry(0); break; // AND A, A
+
+	case(0xA8): Regs.A = Regs.A ^ Regs.B; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; // XOR A, B
 	case(0xA9): Regs.A = Regs.A ^ Regs.C; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; // XOR A, C
+	case(0xAA): Regs.A = Regs.A ^ Regs.D; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; // XOR A, D
+	case(0xAB): Regs.A = Regs.A ^ Regs.E; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; // XOR A, E
+	case(0xAC): Regs.A = Regs.A ^ Regs.H; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; // XOR A, H
 	case(0xAD): Regs.A = Regs.A ^ Regs.L; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; // XOR A, L
 	case(0xAE): Regs.A = Regs.A ^ mmu->ReadByte(HL); SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; // XOR A, (HL)
 	case(0xAF): Regs.A = Regs.A ^ Regs.A; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //XOR A, A
-	case(0xEE): Regs.A = Regs.A ^ mmu->ReadByte(PC++); SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //XOR A, u8
+
+	case(0xB0): Regs.A |= Regs.B; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, B
+	case(0xB1): Regs.A |= Regs.C; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, C
+	case(0xB2): Regs.A |= Regs.D; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, D
+	case(0xB3): Regs.A |= Regs.E; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, E
+	case(0xB4): Regs.A |= Regs.H; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, H
+	case(0xB5): Regs.A |= Regs.L; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, L
+	case(0xB6): Regs.A |= mmu->ReadByte(HL); SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, (HL)
+	case(0xB7): Regs.A |= Regs.A; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //OR A, A
+	
+	case(0xB8): SetFlags(Regs.A, Regs.B, 0, true, CARRYMODE::BOTH); break; //CP A, B
+	case(0xB9): SetFlags(Regs.A, Regs.C, 0, true, CARRYMODE::BOTH); break; //CP A, C
+	case(0xBA): SetFlags(Regs.A, Regs.D, 0, true, CARRYMODE::BOTH); break; //CP A, D
+	case(0xBB): SetFlags(Regs.A, Regs.E, 0, true, CARRYMODE::BOTH); break; //CP A, E
+	case(0xBC): SetFlags(Regs.A, Regs.H, 0, true, CARRYMODE::BOTH); break; //CP A, H
+	case(0xBD): SetFlags(Regs.A, Regs.L, 0, true, CARRYMODE::BOTH); break; //CP A, L
+	case(0xBE): u8iv = mmu->ReadByte(HL); SetFlags(Regs.A, u8iv, 0, true, CARRYMODE::BOTH); break; //CP A, (HL)
+	case(0xBF): SetFlags(Regs.A, Regs.A, 0, true, CARRYMODE::BOTH); break; //CP A, A
+	
+	case(0xC6): u8iv = mmu->ReadByte(PC++); SetFlags(Regs.A, u8iv, 0, false, CARRYMODE::BOTH); Regs.A += u8iv; break; // ADD A, u8
+	case(0xCE): u8iv = mmu->ReadByte(PC++); u16iv = flags.carry; SetFlags(Regs.A, u8iv, flags.carry, false, CARRYMODE::BOTH); Regs.A += u8iv + (uint8_t)u16iv; break; // ADC A, u8
+	case(0xD6): u8iv = mmu->ReadByte(PC++); SetFlags(Regs.A, u8iv, 0, true, CARRYMODE::BOTH); Regs.A -= u8iv; break; // SUB A, u8
+	case(0xDE): u8iv = mmu->ReadByte(PC++); u16iv = flags.carry; SetFlags(Regs.A, u8iv, flags.carry, true, CARRYMODE::BOTH); Regs.A -= u8iv + (uint8_t)u16iv; break; // SBC A, u8
 
 	case(0xE6): u8iv = mmu->ReadByte(PC); PC += 1; Regs.A = Regs.A & u8iv; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(1); SetCarry(0); break; //AND A, u8
-
+	case(0xEE): Regs.A = Regs.A ^ mmu->ReadByte(PC++); SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //XOR A, u8
+	case(0xF6): Regs.A |= mmu->ReadByte(PC++); SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; // OR A, u8
 	case(0xFE): u8iv = mmu->ReadByte(PC); PC += 1; SetFlags(Regs.A, u8iv, 0, true, CARRYMODE::BOTH); break; // CP A, u8
 
 	//ALU 16-bit
 	case(0x03): BC++; break; //INC BC
 	case(0x13): DE++; break; //INC DE
 	case(0x23): HL++; break; //INC HL
+	case(0x33): SP++; break; //INC SP
 
+	case(0x0B): BC--; break; //DEC BC
+	case(0x1B): DE--; break; //DEC DE
+	case(0x2B): HL--; break; //DEC HL
+	case(0x3B): SP--; break; //DEC SP
+
+	case(0x09): SetNeg(0); CalcCarry16(HL, BC, 0, false, CARRYMODE::BOTH); HL += BC; break; //ADD HL, BC
+	case(0x19): SetNeg(0); CalcCarry16(HL, DE, 0, false, CARRYMODE::BOTH); HL += DE; break; //ADD HL, DE
 	case(0x29): SetNeg(0); CalcCarry16(HL, HL, 0, false, CARRYMODE::BOTH); HL += HL; break; //ADD HL, HL
+	case(0x39): SetNeg(0); CalcCarry16(HL, SP, 0, false, CARRYMODE::BOTH); HL += SP; break; //ADD HL, SP
+
+	case(0xE8): i8iv = mmu->ReadByte(PC++); CalcCarry(SP, (uint16_t)i8iv, 0, false, CARRYMODE::BOTH); SetZero(0); SetNeg(0); SP += i8iv; break; // ADD SP, i8
 	
 	//Jumps
-	case(0x18): i8iv = (mmu->ReadByte(PC++)); PC += i8iv; break; //JR i8
+	case(0x18): i8iv = (mmu->ReadByte(PC++)); PC += i8iv; if (i8iv == -2) { std::cout << std::flush; Stopped = true; } break; //JR i8        //TODO remove blargg exit stub
 	case(0x20): i8iv = (mmu->ReadByte(PC++)); if (!flags.zero)  { CycleCounter += 4; PC += i8iv; } break; //JR NZ, i8
 	case(0x28): i8iv = (mmu->ReadByte(PC++)); if (flags.zero)   { CycleCounter += 4; PC += i8iv; } break; //JR Z,  i8
 	case(0x30): i8iv = (mmu->ReadByte(PC++)); if (!flags.carry) { CycleCounter += 4; PC += i8iv; } break; //JR NC, i8
 	case(0x38): i8iv = (mmu->ReadByte(PC++)); if (flags.carry)  { CycleCounter += 4; PC += i8iv; } break; //JR C,  i8
-	case(0xC3): PC = mmu->ReadWord(PC); break; //JP u16
+	
+	case(0xC0): if (!flags.zero) { CycleCounter += 12; PC = Pop(); } break; // RET NZ
+	case(0xC2): u16iv = mmu->ReadWord(PC); PC += 2; if (!flags.zero) { CycleCounter += 4; PC = u16iv; } break; // JP NZ, u16
+	case(0xC3): u16iv = mmu->ReadWord(PC); PC = u16iv; break; //JP u16
 	case(0xC4): u16iv = mmu->ReadWord(PC); PC += 2; if (!flags.zero) { CycleCounter += 12; Push(PC); PC = u16iv; } break; //Call NZ, u16
+	
 	case(0xC8): if (flags.zero) { CycleCounter += 12; PC = Pop(); } break; // Ret Z
 	case(0xC9): PC = Pop(); break; //Return
+	case(0xCA): u16iv = mmu->ReadWord(PC); PC += 2; if (flags.zero) { CycleCounter += 4; PC = u16iv; } break; //JP Z, u16
+	case(0xCC): u16iv = mmu->ReadWord(PC); PC += 2; if (flags.zero) { CycleCounter += 12; Push(PC); PC = u16iv; } break; // Call Z, u16
 	case(0xCD): u16iv = mmu->ReadWord(PC); PC += 2; Push(PC); PC = u16iv; break; //Call
+	
 	case(0xD0): if (!flags.carry) { CycleCounter += 12; PC = Pop(); } break; // Ret NC
+	case(0xD2): u16iv = mmu->ReadWord(PC); PC += 2; if (!flags.carry) { CycleCounter += 4; PC = u16iv; } break; // JP NC, u16
+	case(0xD4): u16iv = mmu->ReadWord(PC); PC += 2; if (!flags.carry) { CycleCounter += 4; Push(PC); PC = u16iv; } break; //Call NC, u16
 	case(0xD8): if (flags.carry) { CycleCounter += 12; PC = Pop(); } break; // Ret C
+	case(0xD9): PC = Pop(); InterruptsEnabled = true; break; //Return, Enable Interrupts
+	case(0xDA): u16iv = mmu->ReadWord(PC); PC += 2; if (flags.carry) { CycleCounter += 4; PC = u16iv; } break; //JP C, u16
+	case(0xDC): u16iv = mmu->ReadWord(PC); PC += 2; if (flags.carry) { CycleCounter += 12; Push(PC); PC = u16iv; } break; // Call C, u16
+
 	case(0xE9): PC = HL; break; //JP HL
+
+	case(0xC7): Push(PC); PC = 0x00; break; // RST 0x00
+	case(0xCF): Push(PC); PC = 0x08; break; // RST 0x08
+	case(0xD7): Push(PC); PC = 0x10; break; // RST 0x10
+	case(0xDF): Push(PC); PC = 0x18; break; // RST 0x18
+	case(0xE7): Push(PC); PC = 0x20; break; // RST 0x20
+	case(0xEF): Push(PC); PC = 0x28; break; // RST 0x28
+	case(0xF7): Push(PC); PC = 0x30; break; // RST 0x30
+	case(0xFF): Push(PC); PC = 0x38; break; // RST 0x38
+	
+
 
 	//The CB alternate-op table
 	case(0xCB):
@@ -350,10 +579,294 @@ void Cpu::Execute(uint8_t op)
 		CycleCounter += CyclesPerOpCB[subop];
 		switch (subop)
 		{
+		case(0x00): u8iv = Regs.B >> 7; Regs.B = Regs.B << 1; Regs.B |= u8iv; SetZero(Regs.B == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RLC B
+		case(0x01): u8iv = Regs.C >> 7; Regs.C = Regs.C << 1; Regs.C |= u8iv; SetZero(Regs.C == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RLC C
+		case(0x02): u8iv = Regs.D >> 7; Regs.D = Regs.D << 1; Regs.D |= u8iv; SetZero(Regs.D == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RLC D
+		case(0x03): u8iv = Regs.E >> 7; Regs.E = Regs.E << 1; Regs.E |= u8iv; SetZero(Regs.E == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RLC E
+		case(0x04): u8iv = Regs.H >> 7; Regs.H = Regs.H << 1; Regs.H |= u8iv; SetZero(Regs.H == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RLC H
+		case(0x05): u8iv = Regs.L >> 7; Regs.L = Regs.L << 1; Regs.L |= u8iv; SetZero(Regs.L == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RLC L
+		case(0x06): u8iv = mmu->ReadByte(HL); u16iv = u8iv >> 7; mmu->WriteByte(HL, (u8iv << 1) | u16iv); SetZero(mmu->ReadByte(HL) == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u16iv); break; // RLC (HL)
+		case(0x07): u8iv = Regs.A >> 7; Regs.A = Regs.A << 1; Regs.A |= u8iv; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RLC A
+
+		case(0x10): u8iv = Regs.B >> 7; Regs.B = Regs.B << 1; Regs.B |= (flags.carry ? 1 : 0); SetZero(Regs.B == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RL B
+		case(0x11): u8iv = Regs.C >> 7; Regs.C = Regs.C << 1; Regs.C |= (flags.carry ? 1 : 0); SetZero(Regs.C == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RL C
+		case(0x12): u8iv = Regs.D >> 7; Regs.D = Regs.D << 1; Regs.D |= (flags.carry ? 1 : 0); SetZero(Regs.D == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RL D
+		case(0x13): u8iv = Regs.E >> 7; Regs.E = Regs.E << 1; Regs.E |= (flags.carry ? 1 : 0); SetZero(Regs.E == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RL E
+		case(0x14): u8iv = Regs.H >> 7; Regs.H = Regs.H << 1; Regs.H |= (flags.carry ? 1 : 0); SetZero(Regs.H == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RL H
+		case(0x15): u8iv = Regs.L >> 7; Regs.L = Regs.L << 1; Regs.L |= (flags.carry ? 1 : 0); SetZero(Regs.L == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RL L
+		case(0x16): u8iv = mmu->ReadByte(HL); u16iv = u8iv >> 7; mmu->WriteByte(HL, (u8iv << 1) | (flags.carry ? 1 : 0)); SetZero(mmu->ReadByte(HL) == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u16iv); break; // RL (HL)
+		case(0x17): u8iv = Regs.A >> 7; Regs.A = Regs.A << 1; Regs.A |= (flags.carry ? 1 : 0); SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RL A
+
+		case(0x08): u8iv = Regs.B & 1; Regs.B = Regs.B >> 1; Regs.B |= (u8iv << 7); SetZero(Regs.B == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RRC B
+		case(0x09): u8iv = Regs.C & 1; Regs.C = Regs.C >> 1; Regs.C |= (u8iv << 7); SetZero(Regs.C == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RRC C
+		case(0x0A): u8iv = Regs.D & 1; Regs.D = Regs.D >> 1; Regs.D |= (u8iv << 7); SetZero(Regs.D == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RRC D
+		case(0x0B): u8iv = Regs.E & 1; Regs.E = Regs.E >> 1; Regs.E |= (u8iv << 7); SetZero(Regs.E == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RRC E
+		case(0x0C): u8iv = Regs.H & 1; Regs.H = Regs.H >> 1; Regs.H |= (u8iv << 7); SetZero(Regs.H == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RRC H
+		case(0x0D): u8iv = Regs.L & 1; Regs.L = Regs.L >> 1; Regs.L |= (u8iv << 7); SetZero(Regs.L == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RRC L
+		case(0x0E): u8iv = mmu->ReadByte(HL); u16iv = u8iv & 1; mmu->WriteByte(HL, (u8iv >> 1) | (u16iv << 7)); SetZero(mmu->ReadByte(HL) == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u16iv); break; // RRC (HL)
+		case(0x0F): u8iv = Regs.A & 1; Regs.A = Regs.A >> 1; Regs.A |= (u8iv << 7); SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RRC A
+
+		case(0x18): u8iv = Regs.B & 1; Regs.B = Regs.B >> 1; Regs.B |= ((flags.carry ? 1 : 0) << 7); SetZero(Regs.B == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RR B
 		case(0x19): u8iv = Regs.C & 1; Regs.C = Regs.C >> 1; Regs.C |= ((flags.carry ? 1 : 0) << 7); SetZero(Regs.C == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RR C
 		case(0x1A): u8iv = Regs.D & 1; Regs.D = Regs.D >> 1; Regs.D |= ((flags.carry ? 1 : 0) << 7); SetZero(Regs.D == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RR D
 		case(0x1B): u8iv = Regs.E & 1; Regs.E = Regs.E >> 1; Regs.E |= ((flags.carry ? 1 : 0) << 7); SetZero(Regs.E == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RR E
+		case(0x1C): u8iv = Regs.H & 1; Regs.H = Regs.H >> 1; Regs.H |= ((flags.carry ? 1 : 0) << 7); SetZero(Regs.H == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RR H
+		case(0x1D): u8iv = Regs.L & 1; Regs.L = Regs.L >> 1; Regs.L |= ((flags.carry ? 1 : 0) << 7); SetZero(Regs.L == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RR L
+		case(0x1E): u8iv = mmu->ReadByte(HL); u16iv = u8iv & 1; mmu->WriteByte(HL, (u8iv >> 1) | ((flags.carry ? 1 : 0) << 7)); SetZero(mmu->ReadByte(HL) == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u16iv); break; // RR (HL)
+		case(0x1F): u8iv = Regs.A & 1; Regs.A = Regs.A >> 1; Regs.A |= ((flags.carry ? 1 : 0) << 7); SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // RR A
+
+		case(0x20): SetCarry(Regs.B >> 7); Regs.B <<= 1; SetZero(Regs.B == 0); SetNeg(0); SetHalfCarry(0); break; // SLA B
+		case(0x21): SetCarry(Regs.C >> 7); Regs.C <<= 1; SetZero(Regs.C == 0); SetNeg(0); SetHalfCarry(0); break; // SLA C
+		case(0x22): SetCarry(Regs.D >> 7); Regs.D <<= 1; SetZero(Regs.D == 0); SetNeg(0); SetHalfCarry(0); break; // SLA D
+		case(0x23): SetCarry(Regs.E >> 7); Regs.E <<= 1; SetZero(Regs.E == 0); SetNeg(0); SetHalfCarry(0); break; // SLA E
+		case(0x24): SetCarry(Regs.H >> 7); Regs.H <<= 1; SetZero(Regs.H == 0); SetNeg(0); SetHalfCarry(0); break; // SLA H
+		case(0x25): SetCarry(Regs.L >> 7); Regs.L <<= 1; SetZero(Regs.L == 0); SetNeg(0); SetHalfCarry(0); break; // SLA L
+		case(0x26): u8iv = mmu->ReadByte(HL); SetCarry(u8iv >> 7); mmu->WriteByte(HL, u8iv << 1); SetZero(mmu->ReadByte(HL) == 0); SetNeg(0); SetHalfCarry(0); break; // SLA (HL)
+		case(0x27): SetCarry(Regs.A >> 7); Regs.A <<= 1; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); break; // SLA A
+
+		case(0x28): u8iv = Regs.B >> 7; SetCarry(Regs.B & 1); Regs.B >>= 1; Regs.B |= u8iv << 7; SetZero(Regs.B == 0); SetNeg(0); SetHalfCarry(0); break; // SRA B
+		case(0x29): u8iv = Regs.C >> 7; SetCarry(Regs.C & 1); Regs.C >>= 1; Regs.C |= u8iv << 7; SetZero(Regs.C == 0); SetNeg(0); SetHalfCarry(0); break; // SRA C
+		case(0x2A): u8iv = Regs.D >> 7; SetCarry(Regs.D & 1); Regs.D >>= 1; Regs.D |= u8iv << 7; SetZero(Regs.D == 0); SetNeg(0); SetHalfCarry(0); break; // SRA D
+		case(0x2B): u8iv = Regs.E >> 7; SetCarry(Regs.E & 1); Regs.E >>= 1; Regs.E |= u8iv << 7; SetZero(Regs.E == 0); SetNeg(0); SetHalfCarry(0); break; // SRA E
+		case(0x2C): u8iv = Regs.H >> 7; SetCarry(Regs.H & 1); Regs.H >>= 1; Regs.H |= u8iv << 7; SetZero(Regs.H == 0); SetNeg(0); SetHalfCarry(0); break; // SRA H
+		case(0x2D): u8iv = Regs.L >> 7; SetCarry(Regs.L & 1); Regs.L >>= 1; Regs.L |= u8iv << 7; SetZero(Regs.L == 0); SetNeg(0); SetHalfCarry(0); break; // SRA L
+		case(0x2E): u8iv = mmu->ReadByte(HL); u16iv = u8iv >> 7; SetCarry(u8iv & 1); mmu->WriteByte(HL, (u8iv >> 1) | (u16iv << 7)); SetZero(mmu->ReadByte(HL) == 0); SetNeg(0); SetHalfCarry(0); break; // SRA (HL)
+		case(0x2F): u8iv = Regs.A >> 7; SetCarry(Regs.A & 1); Regs.A >>= 1; Regs.A |= u8iv << 7; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); break; // SRA A
+
+		case(0x30): u8iv = ((Regs.B >> 4) | (Regs.B << 4)); Regs.B = u8iv; SetZero(Regs.B == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //SWAP B
+		case(0x31): u8iv = ((Regs.C >> 4) | (Regs.C << 4)); Regs.C = u8iv; SetZero(Regs.C == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //SWAP C
+		case(0x32): u8iv = ((Regs.D >> 4) | (Regs.D << 4)); Regs.D = u8iv; SetZero(Regs.D == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //SWAP D
+		case(0x33): u8iv = ((Regs.E >> 4) | (Regs.E << 4)); Regs.E = u8iv; SetZero(Regs.E == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //SWAP E
+		case(0x34): u8iv = ((Regs.H >> 4) | (Regs.H << 4)); Regs.H = u8iv; SetZero(Regs.H == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //SWAP H
+		case(0x35): u8iv = ((Regs.L >> 4) | (Regs.L << 4)); Regs.L = u8iv; SetZero(Regs.L == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //SWAP L
+		case(0x36): u8iv = ((mmu->ReadByte(HL) >> 4) | (mmu->ReadByte(HL) << 4)); mmu->WriteByte(HL, u8iv); SetZero(mmu->ReadByte(HL) == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //SWAP (HL)
+		case(0x37): u8iv = ((Regs.A >> 4) | (Regs.A << 4)); Regs.A = u8iv; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(0); break; //SWAP A
+
 		case(0x38): u8iv = Regs.B & 1; Regs.B = Regs.B >> 1; SetZero(Regs.B == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // SRL B
+		case(0x39): u8iv = Regs.C & 1; Regs.C = Regs.C >> 1; SetZero(Regs.C == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // SRL C
+		case(0x3A): u8iv = Regs.D & 1; Regs.D = Regs.D >> 1; SetZero(Regs.D == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // SRL D
+		case(0x3B): u8iv = Regs.E & 1; Regs.E = Regs.E >> 1; SetZero(Regs.E == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // SRL E
+		case(0x3C): u8iv = Regs.H & 1; Regs.H = Regs.H >> 1; SetZero(Regs.H == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // SRL H
+		case(0x3D): u8iv = Regs.L & 1; Regs.L = Regs.L >> 1; SetZero(Regs.L == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // SRL L
+		case(0x3E): u8iv = mmu->ReadByte(HL); u16iv = u8iv & 1; mmu->WriteByte(HL, u8iv >> 1); SetZero(mmu->ReadByte(HL) == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u16iv); break; // SRL (HL)
+		case(0x3F): u8iv = Regs.A & 1; Regs.A = Regs.A >> 1; SetZero(Regs.A == 0); SetNeg(0); SetHalfCarry(0); SetCarry(u8iv); break; // SRL A
+
+		case(0x40): TestBit(Regs.B, 0); break; // BIT 0, B
+		case(0x41): TestBit(Regs.C, 0); break; // BIT 0, C
+		case(0x42): TestBit(Regs.D, 0); break; // BIT 0, D
+		case(0x43): TestBit(Regs.E, 0); break; // BIT 0, E
+		case(0x44): TestBit(Regs.H, 0); break; // BIT 0, H
+		case(0x45): TestBit(Regs.L, 0); break; // BIT 0, L
+		case(0x46): TestBit(mmu->ReadByte(HL), 0); break; // BIT 0, (HL)
+		case(0x47): TestBit(Regs.A, 0); break; // BIT 0, A
+
+		case(0x48): TestBit(Regs.B, 1); break; // BIT 1, B
+		case(0x49): TestBit(Regs.C, 1); break; // BIT 1, C
+		case(0x4A): TestBit(Regs.D, 1); break; // BIT 1, D
+		case(0x4B): TestBit(Regs.E, 1); break; // BIT 1, E
+		case(0x4C): TestBit(Regs.H, 1); break; // BIT 1, H
+		case(0x4D): TestBit(Regs.L, 1); break; // BIT 1, L
+		case(0x4E): TestBit(mmu->ReadByte(HL), 1); break; // BIT 1, (HL)
+		case(0x4F): TestBit(Regs.A, 1); break; // BIT 1, A
+
+		case(0x50): TestBit(Regs.B, 2); break; // BIT 2, B
+		case(0x51): TestBit(Regs.C, 2); break; // BIT 2, C
+		case(0x52): TestBit(Regs.D, 2); break; // BIT 2, D
+		case(0x53): TestBit(Regs.E, 2); break; // BIT 2, E
+		case(0x54): TestBit(Regs.H, 2); break; // BIT 2, H
+		case(0x55): TestBit(Regs.L, 2); break; // BIT 2, L
+		case(0x56): TestBit(mmu->ReadByte(HL), 2); break; // BIT 2, (HL)
+		case(0x57): TestBit(Regs.A, 2); break; // BIT 2, A
+
+		case(0x58): TestBit(Regs.B, 3); break; // BIT 3, B
+		case(0x59): TestBit(Regs.C, 3); break; // BIT 3, C
+		case(0x5A): TestBit(Regs.D, 3); break; // BIT 3, D
+		case(0x5B): TestBit(Regs.E, 3); break; // BIT 3, E
+		case(0x5C): TestBit(Regs.H, 3); break; // BIT 3, H
+		case(0x5D): TestBit(Regs.L, 3); break; // BIT 3, L
+		case(0x5E): TestBit(mmu->ReadByte(HL), 3); break; // BIT 3, (HL)
+		case(0x5F): TestBit(Regs.A, 3); break; // BIT 3, A
+
+		case(0x60): TestBit(Regs.B, 4); break; // BIT 4, B
+		case(0x61): TestBit(Regs.C, 4); break; // BIT 4, C
+		case(0x62): TestBit(Regs.D, 4); break; // BIT 4, D
+		case(0x63): TestBit(Regs.E, 4); break; // BIT 4, E
+		case(0x64): TestBit(Regs.H, 4); break; // BIT 4, H
+		case(0x65): TestBit(Regs.L, 4); break; // BIT 4, L
+		case(0x66): TestBit(mmu->ReadByte(HL), 4); break; // BIT 4, (HL)
+		case(0x67): TestBit(Regs.A, 4); break; // BIT 4, A
+
+		case(0x68): TestBit(Regs.B, 5); break; // BIT 5, B
+		case(0x69): TestBit(Regs.C, 5); break; // BIT 5, C
+		case(0x6A): TestBit(Regs.D, 5); break; // BIT 5, D
+		case(0x6B): TestBit(Regs.E, 5); break; // BIT 5, E
+		case(0x6C): TestBit(Regs.H, 5); break; // BIT 5, H
+		case(0x6D): TestBit(Regs.L, 5); break; // BIT 5, L
+		case(0x6E): TestBit(mmu->ReadByte(HL), 5); break; // BIT 5, (HL)
+		case(0x6F): TestBit(Regs.A, 5); break; // BIT 5, A
+
+		case(0x70): TestBit(Regs.B, 6); break; // BIT 6, B
+		case(0x71): TestBit(Regs.C, 6); break; // BIT 6, C
+		case(0x72): TestBit(Regs.D, 6); break; // BIT 6, D
+		case(0x73): TestBit(Regs.E, 6); break; // BIT 6, E
+		case(0x74): TestBit(Regs.H, 6); break; // BIT 6, H
+		case(0x75): TestBit(Regs.L, 6); break; // BIT 6, L
+		case(0x76): TestBit(mmu->ReadByte(HL), 6); break; // BIT 6, (HL)
+		case(0x77): TestBit(Regs.A, 6); break; // BIT 6, A
+
+		case(0x78): TestBit(Regs.B, 7); break; // BIT 7, B
+		case(0x79): TestBit(Regs.C, 7); break; // BIT 7, C
+		case(0x7A): TestBit(Regs.D, 7); break; // BIT 7, D
+		case(0x7B): TestBit(Regs.E, 7); break; // BIT 7, E
+		case(0x7C): TestBit(Regs.H, 7); break; // BIT 7, H
+		case(0x7D): TestBit(Regs.L, 7); break; // BIT 7, L
+		case(0x7E): TestBit(mmu->ReadByte(HL), 7); break; // BIT 7, (HL)
+		case(0x7F): TestBit(Regs.A, 7); break; // BIT 7, A
+
+		case(0x80): Regs.B = SetBit(Regs.B, 0, 0); break; // RES 0, B
+		case(0x81): Regs.C = SetBit(Regs.C, 0, 0); break; // RES 0, C
+		case(0x82): Regs.D = SetBit(Regs.D, 0, 0); break; // RES 0, D
+		case(0x83): Regs.E = SetBit(Regs.E, 0, 0); break; // RES 0, E
+		case(0x84): Regs.H = SetBit(Regs.H, 0, 0); break; // RES 0, H
+		case(0x85): Regs.L = SetBit(Regs.L, 0, 0); break; // RES 0, L
+		case(0x86): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 0, 0)); break; // RES 0, (HL)
+		case(0x87): Regs.A = SetBit(Regs.A, 0, 0); break; // RES 0, A
+
+		case(0x88): Regs.B = SetBit(Regs.B, 1, 0); break; // RES 1, B
+		case(0x89): Regs.C = SetBit(Regs.C, 1, 0); break; // RES 1, C
+		case(0x8A): Regs.D = SetBit(Regs.D, 1, 0); break; // RES 1, D
+		case(0x8B): Regs.E = SetBit(Regs.E, 1, 0); break; // RES 1, E
+		case(0x8C): Regs.H = SetBit(Regs.H, 1, 0); break; // RES 1, H
+		case(0x8D): Regs.L = SetBit(Regs.L, 1, 0); break; // RES 1, L
+		case(0x8E): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 1, 0)); break; // RES 1, (HL)
+		case(0x8F): Regs.A = SetBit(Regs.A, 1, 0); break; // RES 1, A
+
+		case(0x90): Regs.B = SetBit(Regs.B, 2, 0); break; // RES 2, B
+		case(0x91): Regs.C = SetBit(Regs.C, 2, 0); break; // RES 2, C
+		case(0x92): Regs.D = SetBit(Regs.D, 2, 0); break; // RES 2, D
+		case(0x93): Regs.E = SetBit(Regs.E, 2, 0); break; // RES 2, E
+		case(0x94): Regs.H = SetBit(Regs.H, 2, 0); break; // RES 2, H
+		case(0x95): Regs.L = SetBit(Regs.L, 2, 0); break; // RES 2, L
+		case(0x96): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 2, 0)); break; // RES 0, (HL)
+		case(0x97): Regs.A = SetBit(Regs.A, 2, 0); break; // RES 2, A
+
+		case(0x98): Regs.B = SetBit(Regs.B, 3, 0); break; // RES 3, B
+		case(0x99): Regs.C = SetBit(Regs.C, 3, 0); break; // RES 3, C
+		case(0x9A): Regs.D = SetBit(Regs.D, 3, 0); break; // RES 3, D
+		case(0x9B): Regs.E = SetBit(Regs.E, 3, 0); break; // RES 3, E
+		case(0x9C): Regs.H = SetBit(Regs.H, 3, 0); break; // RES 3, H
+		case(0x9D): Regs.L = SetBit(Regs.L, 3, 0); break; // RES 3, L
+		case(0x9E): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 3, 0)); break; // RES 3, (HL)
+		case(0x9F): Regs.A = SetBit(Regs.A, 3, 0); break; // RES 3, A
+
+		case(0xA0): Regs.B = SetBit(Regs.B, 4, 0); break; // RES 4, B
+		case(0xA1): Regs.C = SetBit(Regs.C, 4, 0); break; // RES 4, C
+		case(0xA2): Regs.D = SetBit(Regs.D, 4, 0); break; // RES 4, D
+		case(0xA3): Regs.E = SetBit(Regs.E, 4, 0); break; // RES 4, E
+		case(0xA4): Regs.H = SetBit(Regs.H, 4, 0); break; // RES 4, H
+		case(0xA5): Regs.L = SetBit(Regs.L, 4, 0); break; // RES 4, L
+		case(0xA6): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 4, 0)); break; // RES 4, (HL)
+		case(0xA7): Regs.A = SetBit(Regs.A, 4, 0); break; // RES 4, A
+
+		case(0xA8): Regs.B = SetBit(Regs.B, 5, 0); break; // RES 5, B
+		case(0xA9): Regs.C = SetBit(Regs.C, 5, 0); break; // RES 5, C
+		case(0xAA): Regs.D = SetBit(Regs.D, 5, 0); break; // RES 5, D
+		case(0xAB): Regs.E = SetBit(Regs.E, 5, 0); break; // RES 5, E
+		case(0xAC): Regs.H = SetBit(Regs.H, 5, 0); break; // RES 5, H
+		case(0xAD): Regs.L = SetBit(Regs.L, 5, 0); break; // RES 5, L
+		case(0xAE): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 5, 0)); break; // RES 5, (HL)
+		case(0xAF): Regs.A = SetBit(Regs.A, 5, 0); break; // RES 5, A
+
+		case(0xB0): Regs.B = SetBit(Regs.B, 6, 0); break; // RES 6, B
+		case(0xB1): Regs.C = SetBit(Regs.C, 6, 0); break; // RES 6, C
+		case(0xB2): Regs.D = SetBit(Regs.D, 6, 0); break; // RES 6, D
+		case(0xB3): Regs.E = SetBit(Regs.E, 6, 0); break; // RES 6, E
+		case(0xB4): Regs.H = SetBit(Regs.H, 6, 0); break; // RES 6, H
+		case(0xB5): Regs.L = SetBit(Regs.L, 6, 0); break; // RES 6, L
+		case(0xB6): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 6, 0)); break; // RES 6, (HL)
+		case(0xB7): Regs.A = SetBit(Regs.A, 6, 0); break; // RES 6, A
+
+		case(0xB8): Regs.B = SetBit(Regs.B, 7, 0); break; // RES 7, B
+		case(0xB9): Regs.C = SetBit(Regs.C, 7, 0); break; // RES 7, C
+		case(0xBA): Regs.D = SetBit(Regs.D, 7, 0); break; // RES 7, D
+		case(0xBB): Regs.E = SetBit(Regs.E, 7, 0); break; // RES 7, E
+		case(0xBC): Regs.H = SetBit(Regs.H, 7, 0); break; // RES 7, H
+		case(0xBD): Regs.L = SetBit(Regs.L, 7, 0); break; // RES 7, L
+		case(0xBE): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 7, 0)); break; // RES 7, (HL)
+		case(0xBF): Regs.A = SetBit(Regs.A, 7, 0); break; // RES 7, A
+
+		case(0xC0): Regs.B = SetBit(Regs.B, 0, 1); break; // SET 0, B
+		case(0xC1): Regs.C = SetBit(Regs.C, 0, 1); break; // SET 0, C
+		case(0xC2): Regs.D = SetBit(Regs.D, 0, 1); break; // SET 0, D
+		case(0xC3): Regs.E = SetBit(Regs.E, 0, 1); break; // SET 0, E
+		case(0xC4): Regs.H = SetBit(Regs.H, 0, 1); break; // SET 0, H
+		case(0xC5): Regs.L = SetBit(Regs.L, 0, 1); break; // SET 0, L
+		case(0xC6): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 0, 1)); break; // SET 0, (HL)
+		case(0xC7): Regs.A = SetBit(Regs.A, 0, 1); break; // SET 0, A
+
+		case(0xC8): Regs.B = SetBit(Regs.B, 1, 1); break; // SET 1, B
+		case(0xC9): Regs.C = SetBit(Regs.C, 1, 1); break; // SET 1, C
+		case(0xCA): Regs.D = SetBit(Regs.D, 1, 1); break; // SET 1, D
+		case(0xCB): Regs.E = SetBit(Regs.E, 1, 1); break; // SET 1, E
+		case(0xCC): Regs.H = SetBit(Regs.H, 1, 1); break; // SET 1, H
+		case(0xCD): Regs.L = SetBit(Regs.L, 1, 1); break; // SET 1, L
+		case(0xCE): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 1, 1)); break; // SET 1, (HL)
+		case(0xCF): Regs.A = SetBit(Regs.A, 1, 1); break; // SET 1, A
+
+		case(0xD0): Regs.B = SetBit(Regs.B, 2, 1); break; // SET 2, B
+		case(0xD1): Regs.C = SetBit(Regs.C, 2, 1); break; // SET 2, C
+		case(0xD2): Regs.D = SetBit(Regs.D, 2, 1); break; // SET 2, D
+		case(0xD3): Regs.E = SetBit(Regs.E, 2, 1); break; // SET 2, E
+		case(0xD4): Regs.H = SetBit(Regs.H, 2, 1); break; // SET 2, H
+		case(0xD5): Regs.L = SetBit(Regs.L, 2, 1); break; // SET 2, L
+		case(0xD6): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 2, 1)); break; // SET 0, (HL)
+		case(0xD7): Regs.A = SetBit(Regs.A, 2, 1); break; // SET 2, A
+
+		case(0xD8): Regs.B = SetBit(Regs.B, 3, 1); break; // SET 3, B
+		case(0xD9): Regs.C = SetBit(Regs.C, 3, 1); break; // SET 3, C
+		case(0xDA): Regs.D = SetBit(Regs.D, 3, 1); break; // SET 3, D
+		case(0xDB): Regs.E = SetBit(Regs.E, 3, 1); break; // SET 3, E
+		case(0xDC): Regs.H = SetBit(Regs.H, 3, 1); break; // SET 3, H
+		case(0xDD): Regs.L = SetBit(Regs.L, 3, 1); break; // SET 3, L
+		case(0xDE): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 3, 1)); break; // SET 3, (HL)
+		case(0xDF): Regs.A = SetBit(Regs.A, 3, 1); break; // SET 3, A
+
+		case(0xE0): Regs.B = SetBit(Regs.B, 4, 1); break; // SET 4, B
+		case(0xE1): Regs.C = SetBit(Regs.C, 4, 1); break; // SET 4, C
+		case(0xE2): Regs.D = SetBit(Regs.D, 4, 1); break; // SET 4, D
+		case(0xE3): Regs.E = SetBit(Regs.E, 4, 1); break; // SET 4, E
+		case(0xE4): Regs.H = SetBit(Regs.H, 4, 1); break; // SET 4, H
+		case(0xE5): Regs.L = SetBit(Regs.L, 4, 1); break; // SET 4, L
+		case(0xE6): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 4, 1)); break; // SET 4, (HL)
+		case(0xE7): Regs.A = SetBit(Regs.A, 4, 1); break; // SET 4, A
+
+		case(0xE8): Regs.B = SetBit(Regs.B, 5, 1); break; // SET 5, B
+		case(0xE9): Regs.C = SetBit(Regs.C, 5, 1); break; // SET 5, C
+		case(0xEA): Regs.D = SetBit(Regs.D, 5, 1); break; // SET 5, D
+		case(0xEB): Regs.E = SetBit(Regs.E, 5, 1); break; // SET 5, E
+		case(0xEC): Regs.H = SetBit(Regs.H, 5, 1); break; // SET 5, H
+		case(0xED): Regs.L = SetBit(Regs.L, 5, 1); break; // SET 5, L
+		case(0xEE): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 5, 1)); break; // SET 5, (HL)
+		case(0xEF): Regs.A = SetBit(Regs.A, 5, 1); break; // SET 5, A
+
+		case(0xF0): Regs.B = SetBit(Regs.B, 6, 1); break; // SET 6, B
+		case(0xF1): Regs.C = SetBit(Regs.C, 6, 1); break; // SET 6, C
+		case(0xF2): Regs.D = SetBit(Regs.D, 6, 1); break; // SET 6, D
+		case(0xF3): Regs.E = SetBit(Regs.E, 6, 1); break; // SET 6, E
+		case(0xF4): Regs.H = SetBit(Regs.H, 6, 1); break; // SET 6, H
+		case(0xF5): Regs.L = SetBit(Regs.L, 6, 1); break; // SET 6, L
+		case(0xF6): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 6, 1)); break; // SET 6, (HL)
+		case(0xF7): Regs.A = SetBit(Regs.A, 6, 1); break; // SET 6, A
+
+		case(0xF8): Regs.B = SetBit(Regs.B, 7, 1); break; // SET 7, B
+		case(0xF9): Regs.C = SetBit(Regs.C, 7, 1); break; // SET 7, C
+		case(0xFA): Regs.D = SetBit(Regs.D, 7, 1); break; // SET 7, D
+		case(0xFB): Regs.E = SetBit(Regs.E, 7, 1); break; // SET 7, E
+		case(0xFC): Regs.H = SetBit(Regs.H, 7, 1); break; // SET 7, H
+		case(0xFD): Regs.L = SetBit(Regs.L, 7, 1); break; // SET 7, L
+		case(0xFE): u8iv = mmu->ReadByte(HL); mmu->WriteByte(HL, SetBit(u8iv, 7, 1)); break; // SET 7, (HL)
+		case(0xFF): Regs.A = SetBit(Regs.A, 7, 1); break; // SET 7, A
+
 		//How?
 		default:
 			std::cout << "Undefined instruction: 0xCB 0x"
@@ -399,5 +912,5 @@ void Cpu::PrintCPUState()
 	<< std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(PC+1) << ' '
 	<< std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(PC+2) << ' '
 	<< std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(PC+3)
-	<< ")" << std::endl;
+	<< ")" << '\n';
 }
