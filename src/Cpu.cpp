@@ -3,101 +3,63 @@
 #include <iostream>
 #include <iomanip>
 
-Cpu::Cpu(Mmu* __mmu) : mmu(__mmu)
+Cpu::Cpu(Mmu* __mmu, Ppu* __ppu) : mmu(__mmu), ppu(__ppu)
 {
 	if (!mmu->isBootRomEnabled()) //fake it til you make it
 	{
-		AF = 0x01B0; //0x11B0
+		//set cpu registers
+		AF = 0x01B0;
 		BC = 0x0013;
 		DE = 0x00D8;
 		HL = 0x014D;
 		SP = 0xFFFE;
 		PC = 0x0100;
 		SyncFlagsFromReg();
-	}
 
-	//stub LY to 0x90 (line 144, begin VBlank)
-	mmu->WriteByte(0xFF44, 0x90);
+		//set mmio registers
+		mmu->WriteByte(0xFF44, 0x90); //stub LY to 0x90 (line 144, begin VBlank)
+		mmu->WriteByte(0xFF00, 0xFF); //stub input, no buttons pressed
+		mmu->WriteByte(0xFF04, 0xAB); //DIV (system internal counter is 0xABCC)
+		mmu->WriteByte(0xFF05, 0x00); //TIMA
+		mmu->WriteByte(0xFF06, 0x00); //TMA
+		mmu->WriteByte(0xFF07, 0x00); //TAC
+		mmu->WriteByte(0xFF0F, 0x00); //IF
+		mmu->WriteByte(0xFFFF, 0x00); //IE
+	}
 
 }
 
 void Cpu::Tick()
 {
+	//PrintCPUState();
+
+	UpdatePpu();
+	UpdateTimers();
+
+	//handle interrupts
+	HandleInterrupts();
+
 	if (Stopped)
 		return;
 
 	if (Halted)
 	{
 		OpsCounter++;
-		CycleCounter += CyclesPerOp[0x00];
-		return;
+		CycleCounter += 4;
 	}
-
-	//PrintCPUState();
-
-	bool IME_precheck = InterruptsEnabled;
-
-	uint8_t nextOp = mmu->ReadByte(PC);
-	PC += 1;
-	Execute(nextOp);
-
-	//handle interrupts
-	if (IME_precheck && InterruptsEnabled) //delau the effect of enabling IME by 1 operation
+	else
 	{
-		//FFFF - IE - interrupt enabled
-		//FF0F - IF - interrupt requested
-
-		//Bit 0: V-Blank  0x40
-		//Bit 1: LCD STAT 0x48
-		//Bit 2: Timer    0x50
-		//Bit 3: Serial   0x58
-		//Bit 4: Joypad   0x60
-
-		uint8_t REG_IE = mmu->ReadByte(0xFFFF);
-		uint8_t REG_IF = mmu->ReadByte(0xFF0F);
-
-		//if interrupts are enabled globally, and at least 1 interrupt is both enabled and requested
-		if (REG_IE & REG_IF & 0x1F) 
-		{
-			InterruptsEnabled = false;
-			CycleCounter += 20; //assuming interrupt handling process takes 20 cycles per z80 spec sheet / pan docs
-			
-			if (Halted)
-			{
-				Halted = false;
-				CycleCounter += 4;
-			}
-
-			Push(PC);
-
-			if (REG_IE & REG_IF & 0x1) //v-blank
-			{
-				mmu->WriteByte(0xFF0F, REG_IF & (0xFE)); //disable vblank bit in IF
-				PC = 0x40;
-			}
-			else if (REG_IE & REG_IF & 0x2) //lcd stat
-			{
-				mmu->WriteByte(0xFF0F, REG_IF & (0xFD)); //disable lcd stat bit in IF
-				PC = 0x48;
-			}
-			else if (REG_IE & REG_IF & 0x4) //timer
-			{
-				mmu->WriteByte(0xFF0F, REG_IF & (0xFB)); //disable timer bit in IF
-				PC = 0x50;
-			}
-			else if (REG_IE & REG_IF & 0x8) //serial
-			{
-				mmu->WriteByte(0xFF0F, REG_IF & (0xF7)); //disable serial bit in IF
-				PC = 0x58;
-			}
-			else if (REG_IE & REG_IF & 0x10) //joypad
-			{
-				mmu->WriteByte(0xFF0F, REG_IF & (0xEF)); //disable joypad bit in IF
-				PC = 0x60;
-			}
-		}
+		uint8_t nextOp = mmu->ReadByte(PC);
+		PC += 1;
+		Execute(nextOp);
 	}
 
+
+
+
+	//UpdatePpu();
+	//UpdateTimers();
+	//HandleInterrupts();
 	//PrintCPUState();
 }
 
@@ -231,16 +193,169 @@ uint8_t Cpu::SetBit(uint8_t Op, uint8_t bitNum, bool enabled)
 	return Op & ~temp;
 }
 
+void Cpu::HandleInterrupts()
+{
+	//FFFF - IE - interrupt enabled
+	//FF0F - IF - interrupt requested
+
+	//Bit 0: V-Blank  0x40
+	//Bit 1: LCD STAT 0x48
+	//Bit 2: Timer    0x50
+	//Bit 3: Serial   0x58
+	//Bit 4: Joypad   0x60
+
+	uint8_t REG_IE = mmu->ReadByte(0xFFFF);
+	uint8_t REG_IF = mmu->ReadByte(0xFF0F);
+
+	//at least 1 interrupt is both enabled and requested
+	if (REG_IE & REG_IF & 0x1F)
+	{
+		//even if IME is disabled, any interrupt that's enabled and requested will clear Halt status
+		if (Halted)
+		{
+			Halted = false;
+			CycleCounter += 4;
+
+			//TODO: implement halt bug here?
+		}
+
+		if (InterruptsEnabled) // IME flag is true, disable the IF bit and jump to the handler for the highest priority interrupt that's enabled AND requested
+		{
+			Push(PC);
+			InterruptsEnabled = false;
+			CycleCounter += 20; //assuming interrupt handling process takes 20 cycles per z80 spec sheet / pan docs
+
+			if (REG_IE & REG_IF & 0x1) //v-blank
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xFE)); // disable vblank bit in IF.   IF & 1111 1110
+				PC = 0x0040;
+			}
+			else if (REG_IE & REG_IF & 0x2) //lcd stat
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xFD)); // disable lcd stat bit in IF. IF & 1111 1101
+				PC = 0x0048;
+			}
+			else if (REG_IE & REG_IF & 0x4) //timer
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xFB)); // disable timer bit in IF.    IF & 1111 1011
+				PC = 0x0050;
+			}
+			else if (REG_IE & REG_IF & 0x8) //serial
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xF7)); // disable serial bit in IF.   IF & 1111 0111
+				PC = 0x0058;
+			}
+			else if (REG_IE & REG_IF & 0x10) //joypad
+			{
+				mmu->WriteByte(0xFF0F, REG_IF & (0xEF)); // disable joypad bit in IF.   IF & 1110 1111
+				PC = 0x0060;
+			}
+		}
+	}
+	return;
+}
+
+void Cpu::UpdateTimers()
+{
+	//CycleCounter is in t-cycles
+
+	//t-cycle speed is 4,194,304 hz
+	//m-cycle speed is 1,048,576 hz
+
+	// DIV  - FF04 - Divider Register (R/W)
+	//div register increments at 16,384 hz (every 256 t-cycles)
+	//div overflows from 255 to 0
+	//writing to div sets to 0
+
+	if (!Stopped) //update DIV
+	{
+		div_cycles += CycleCounter;
+		uint8_t div = mmu->ReadByte(0xFF04);
+
+		while (div_cycles >= 256)
+		{
+			div++;
+			div_cycles -= 256;
+		}
+
+		mmu->SaveDiv(div);
+
+	}
+
+	// TIMA - FF05 - Timer counter (R/W)
+	//This timer is incremented at a clock frequency specified by the TAC register ($FF07).
+	//When the value overflows(gets bigger than FFh) then it will be reset to the value specified in TMA(FF06), and an interrupt will be requested
+
+	// TMA  - FF06 - Timer Modulo (R/W)
+	//When the TIMA overflows, this data will be loaded.
+
+	// TAC  - FF07 - Timer Control(R / W)
+		//Bit  2 - Timer Enable
+		//Bits 1 - 0 - Input Clock Select
+		//00: CPU Clock / 1024 (DMG, SGB2, CGB Single Speed Mode: 4096 Hz,   SGB1: ~4194 Hz,   CGB Double Speed Mode: 8192 Hz)
+		//01: CPU Clock / 16   (DMG, SGB2, CGB Single Speed Mode: 262144 Hz, SGB1: ~268400 Hz, CGB Double Speed Mode: 524288 Hz)
+		//10: CPU Clock / 64   (DMG, SGB2, CGB Single Speed Mode: 65536 Hz,  SGB1: ~67110 Hz,  CGB Double Speed Mode: 131072 Hz)
+		//11: CPU Clock / 256  (DMG, SGB2, CGB Single Speed Mode: 16384 Hz,  SGB1: ~16780 Hz,  CGB Double Speed Mode: 32768 Hz)
+	
+	uint8_t tima = mmu->ReadByte(0xFF05);
+	uint8_t tma  = mmu->ReadByte(0xFF06);
+	uint8_t tac  = mmu->ReadByte(0xFF07);
+	timer_cycles += CycleCounter;
+
+	if (TIMARolloverTriggered)
+	{
+		//set timer counter to the timer modulo value
+		tima = tma;
+
+		//request timer interrupt by setting bit 2 of 0xFF0F
+		uint8_t reg_if = mmu->ReadByte(0xFF0F);
+		reg_if |= 0x04;
+		mmu->WriteByte(0xFF0F, reg_if);
+		TIMARolloverTriggered = false;
+		mmu->WriteByte(0xFF05, tima);
+	}
+	else if (tac & 0x04) // tac & 0000 0100, timer enable bit
+	{
+		
+		uint16_t cycle_threshold = timer_cycle_thresholds[tac & 0x03]; // frequency set by bottom 2 bits of tac. tac & 0000 0011
+		while (timer_cycles >= cycle_threshold)
+		{
+			if (tima == 0xFF) // increasing the timer would overflow
+				TIMARolloverTriggered = true;
+			
+			tima++;
+
+			timer_cycles -= cycle_threshold;
+		}
+
+		mmu->WriteByte(0xFF05, tima);
+
+	}
+
+	TotalCyclesCounter += CycleCounter;
+	CycleCounter = 0;
+
+}
+
+void Cpu::UpdatePpu()
+{
+	ppu->Tick(CycleCounter);
+}
+
 void Cpu::Execute(uint8_t op)
 {
 	OpsCounter++;
 	CycleCounter += CyclesPerOp[op];
 
+	//EI enables interrupts one instruction late
+	InterruptsEnabled = (InterruptsEnabled || EI_DelayedInterruptEnableFlag);
+	EI_DelayedInterruptEnableFlag = false;
+
 	//temporary immediate values
 	uint8_t u8iv;
 	int8_t i8iv;
 	uint16_t u16iv;
-	int16_t i16iv;
+	//int16_t i16iv;
 
 	switch (op)
 	{
@@ -249,7 +364,7 @@ void Cpu::Execute(uint8_t op)
 	case(0x10): Stopped = true; break;
 	case(0x76): Halted = true; break; //HALT
 	case(0xF3): InterruptsEnabled = false; break; //DI
-	case(0xFB): InterruptsEnabled = true;  break; //EI
+	case(0xFB): EI_DelayedInterruptEnableFlag = true;  break; //EI
 
 	//Rotate/Shift/Bitops
 
@@ -534,7 +649,7 @@ void Cpu::Execute(uint8_t op)
 	case(0xE8): i8iv = mmu->ReadByte(PC++); CalcCarry(SP, (uint16_t)i8iv, 0, false, CARRYMODE::BOTH); SetZero(0); SetNeg(0); SP += i8iv; break; // ADD SP, i8
 	
 	//Jumps
-	case(0x18): i8iv = (mmu->ReadByte(PC++)); PC += i8iv; if (i8iv == -2) { std::cout << std::flush; Stopped = true; } break; //JR i8        //TODO remove blargg exit stub
+	case(0x18): i8iv = (mmu->ReadByte(PC++)); PC += i8iv; if (i8iv == -2) { Stopped = true; } break; //JR i8 TODO: remove blargg stub
 	case(0x20): i8iv = (mmu->ReadByte(PC++)); if (!flags.zero)  { CycleCounter += 4; PC += i8iv; } break; //JR NZ, i8
 	case(0x28): i8iv = (mmu->ReadByte(PC++)); if (flags.zero)   { CycleCounter += 4; PC += i8iv; } break; //JR Z,  i8
 	case(0x30): i8iv = (mmu->ReadByte(PC++)); if (!flags.carry) { CycleCounter += 4; PC += i8iv; } break; //JR NC, i8
@@ -555,7 +670,7 @@ void Cpu::Execute(uint8_t op)
 	case(0xD2): u16iv = mmu->ReadWord(PC); PC += 2; if (!flags.carry) { CycleCounter += 4; PC = u16iv; } break; // JP NC, u16
 	case(0xD4): u16iv = mmu->ReadWord(PC); PC += 2; if (!flags.carry) { CycleCounter += 4; Push(PC); PC = u16iv; } break; //Call NC, u16
 	case(0xD8): if (flags.carry) { CycleCounter += 12; PC = Pop(); } break; // Ret C
-	case(0xD9): PC = Pop(); InterruptsEnabled = true; break; //Return, Enable Interrupts
+	case(0xD9): PC = Pop(); InterruptsEnabled = true; break; //RETI, Return and Enable Interrupts Immediately
 	case(0xDA): u16iv = mmu->ReadWord(PC); PC += 2; if (flags.carry) { CycleCounter += 4; PC = u16iv; } break; //JP C, u16
 	case(0xDC): u16iv = mmu->ReadWord(PC); PC += 2; if (flags.carry) { CycleCounter += 12; Push(PC); PC = u16iv; } break; // Call C, u16
 
@@ -891,6 +1006,7 @@ void Cpu::Execute(uint8_t op)
 		Stopped = true;
 		break;
 	}
+
 	return;
 }
 
@@ -912,5 +1028,13 @@ void Cpu::PrintCPUState()
 	<< std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(PC+1) << ' '
 	<< std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(PC+2) << ' '
 	<< std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(PC+3)
-	<< ")" << '\n';
+	<< ")"
+	<< " IME: " << (int)InterruptsEnabled
+	<< " IE: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFFFF)
+	<< " IF: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF0F)
+	<< " DIV: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF04)
+	<< " TIMA: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF05)
+	<< " TMA: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF06)
+	<< " TAC: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF07)
+	<< '\n';
 }

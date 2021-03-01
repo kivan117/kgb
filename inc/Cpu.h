@@ -1,14 +1,17 @@
 #pragma once
 #include "Mmu.h"
+#include "Ppu.h"
 #include <stdint.h>
 class Cpu
 {
 public:
-	Cpu(Mmu* __mmu);
+	Cpu(Mmu* __mmu, Ppu* __ppu);
 	void Tick();
 	bool GetStopped();
 private:
 	Mmu* mmu;
+	Ppu* ppu;
+
 	void Execute(uint8_t op);
 
 	void PrintCPUState();
@@ -63,10 +66,22 @@ private:
 
 	bool Halted{ false };
 	bool Stopped{ false };
-	bool InterruptsEnabled{ false }; // IME flag. Not mapped to memory
+	bool InterruptsEnabled{ true }; // IME flag. Not mapped to memory
+	bool EI_DelayedInterruptEnableFlag = false; //set by EI, will be checked to turn InterruptsEnabled on one instruction later
+
+	void HandleInterrupts();
+
 
 	uint64_t CycleCounter{ 0 };
+	uint64_t TotalCyclesCounter{ 0 };
 	uint64_t OpsCounter{ 0 };
+
+	uint64_t div_cycles{ 0 };
+	uint64_t timer_cycles{ 0 };
+	uint16_t timer_cycle_thresholds[4] = { 1024, 16, 64, 256 };
+	bool TIMARolloverTriggered{ false };
+
+	void UpdateTimers();
 
 	//the minimum amount of t-cycles each operation takes. 
 	//for variable-time ops, the extra time needs to be added by the op
@@ -109,6 +124,8 @@ private:
 			8,  8,  8,  8,  8,  8,  16, 8,  8,  8,  8,  8,  8,  8,  16, 8,  // E
 			8,  8,  8,  8,  8,  8,  16, 8,  8,  8,  8,  8,  8,  8,  16, 8   // F
 	};
+
+	void UpdatePpu();
 
 };
 

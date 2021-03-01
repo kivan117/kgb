@@ -19,8 +19,10 @@ int main(int argc, char* argv[])
 	}
 
 	Mmu* mmu = new Mmu();
-	Cpu* cpu = new Cpu(mmu);
-	Ppu* ppu = new Ppu();
+
+	Ppu* ppu = new Ppu(mmu);
+
+	Cpu* cpu = new Cpu(mmu, ppu);
 
 	std::ifstream inFile;
 	inFile.open(argv[1], std::ios::in | std::ios::binary);
