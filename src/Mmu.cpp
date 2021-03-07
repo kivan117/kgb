@@ -51,8 +51,20 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 
 	if (addr == 0xFF04) //DIV timer register, set to 0 on write
 	{
-		Memory[addr] = 0;
+		master_clock = 0;
+		Memory[0xFF04] = 0;
 		return;
+	}
+
+	if (addr == 0xFF05) //tima
+	{
+		Memory[0xFF05] = val;
+		return;
+	}
+
+	if (addr == 0xFF50 && val)
+	{
+		bootRomEnabled = false;
 	}
 
 	//if(addr == 0xFF0F)
@@ -87,6 +99,11 @@ void Mmu::WriteWord(uint16_t addr, uint16_t val)
 uint8_t* Mmu::GetROM()
 {
 	return &ROM[0];
+}
+
+uint8_t* Mmu::GetDMGBootRom()
+{
+	return &DMGBootROM[0];
 }
 
 bool Mmu::isBootRomEnabled()

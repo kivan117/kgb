@@ -19,25 +19,23 @@ Cpu::Cpu(Mmu* __mmu, Ppu* __ppu) : mmu(__mmu), ppu(__ppu)
 		//set mmio registers
 		mmu->WriteByte(0xFF44, 0x90); //stub LY to 0x90 (line 144, begin VBlank)
 		mmu->WriteByte(0xFF00, 0xFF); //stub input, no buttons pressed
-		mmu->WriteByte(0xFF04, 0xAB); //DIV (system internal counter is 0xABCC)
 		mmu->WriteByte(0xFF05, 0x00); //TIMA
 		mmu->WriteByte(0xFF06, 0x00); //TMA
 		mmu->WriteByte(0xFF07, 0x00); //TAC
 		mmu->WriteByte(0xFF0F, 0x00); //IF
 		mmu->WriteByte(0xFFFF, 0x00); //IE
+		UpdateTimers(0xABCC); //set DIV
 	}
 
+	mmu->WriteByte(0xFF44, 0x90); //stub LY to 0x90 (line 144, begin VBlank)
+	mmu->WriteByte(0xFF00, 0xFF); //stub input, no buttons pressed
 }
 
 void Cpu::Tick()
 {
-	//PrintCPUState();
 
-	UpdatePpu();
-	UpdateTimers();
-
-	//handle interrupts
-	HandleInterrupts();
+	//if(PC >= 0x100)
+	//	PrintCPUState();
 
 	if (Stopped)
 		return;
@@ -54,13 +52,12 @@ void Cpu::Tick()
 		Execute(nextOp);
 	}
 
-
-
-
-	//UpdatePpu();
-	//UpdateTimers();
-	//HandleInterrupts();
 	//PrintCPUState();
+	UpdatePpu();
+	//handle interrupts
+	HandleInterrupts();
+	UpdateTimers(CycleCounter);
+	CycleCounter = 0;
 }
 
 void Cpu::Push(uint16_t addr)
@@ -255,85 +252,60 @@ void Cpu::HandleInterrupts()
 	return;
 }
 
-void Cpu::UpdateTimers()
+void Cpu::UpdateTimers(uint16_t cycles)
 {
-	//CycleCounter is in t-cycles
-
-	//t-cycle speed is 4,194,304 hz
-	//m-cycle speed is 1,048,576 hz
-
-	// DIV  - FF04 - Divider Register (R/W)
-	//div register increments at 16,384 hz (every 256 t-cycles)
-	//div overflows from 255 to 0
-	//writing to div sets to 0
+	mmu->master_clock += cycles;
 
 	if (!Stopped) //update DIV
 	{
-		div_cycles += CycleCounter;
-		uint8_t div = mmu->ReadByte(0xFF04);
+		//div_cycles += cycles;
+		//uint8_t div = mmu->ReadByte(0xFF04);
 
-		while (div_cycles >= 256)
-		{
-			div++;
-			div_cycles -= 256;
-		}
-
+		//while (div_cycles >= 256)
+		//{
+		//	div++;
+		//	div_cycles -= 256;
+		//}
+		uint8_t div = mmu->master_clock >> 8;
 		mmu->SaveDiv(div);
 
 	}
 
-	// TIMA - FF05 - Timer counter (R/W)
-	//This timer is incremented at a clock frequency specified by the TAC register ($FF07).
-	//When the value overflows(gets bigger than FFh) then it will be reset to the value specified in TMA(FF06), and an interrupt will be requested
-
-	// TMA  - FF06 - Timer Modulo (R/W)
-	//When the TIMA overflows, this data will be loaded.
-
-	// TAC  - FF07 - Timer Control(R / W)
-		//Bit  2 - Timer Enable
-		//Bits 1 - 0 - Input Clock Select
-		//00: CPU Clock / 1024 (DMG, SGB2, CGB Single Speed Mode: 4096 Hz,   SGB1: ~4194 Hz,   CGB Double Speed Mode: 8192 Hz)
-		//01: CPU Clock / 16   (DMG, SGB2, CGB Single Speed Mode: 262144 Hz, SGB1: ~268400 Hz, CGB Double Speed Mode: 524288 Hz)
-		//10: CPU Clock / 64   (DMG, SGB2, CGB Single Speed Mode: 65536 Hz,  SGB1: ~67110 Hz,  CGB Double Speed Mode: 131072 Hz)
-		//11: CPU Clock / 256  (DMG, SGB2, CGB Single Speed Mode: 16384 Hz,  SGB1: ~16780 Hz,  CGB Double Speed Mode: 32768 Hz)
 	
 	uint8_t tima = mmu->ReadByte(0xFF05);
 	uint8_t tma  = mmu->ReadByte(0xFF06);
 	uint8_t tac  = mmu->ReadByte(0xFF07);
-	timer_cycles += CycleCounter;
+	
 
-	if (TIMARolloverTriggered)
+	if (tac & 0x04) // tac & 0000 0100, timer enable bit
 	{
-		//set timer counter to the timer modulo value
-		tima = tma;
-
-		//request timer interrupt by setting bit 2 of 0xFF0F
-		uint8_t reg_if = mmu->ReadByte(0xFF0F);
-		reg_if |= 0x04;
-		mmu->WriteByte(0xFF0F, reg_if);
-		TIMARolloverTriggered = false;
-		mmu->WriteByte(0xFF05, tima);
-	}
-	else if (tac & 0x04) // tac & 0000 0100, timer enable bit
-	{
-		
+		timer_cycles += cycles;
 		uint16_t cycle_threshold = timer_cycle_thresholds[tac & 0x03]; // frequency set by bottom 2 bits of tac. tac & 0000 0011
 		while (timer_cycles >= cycle_threshold)
 		{
 			if (tima == 0xFF) // increasing the timer would overflow
-				TIMARolloverTriggered = true;
-			
-			tima++;
+			{
+				//set timer counter to the timer modulo value
+				tima = tma;
+				mmu->WriteByte(0xFF05, tima);
+
+				//request timer interrupt by setting bit 2 of 0xFF0F
+				uint8_t reg_if = mmu->ReadByte(0xFF0F);
+				reg_if |= 0x04;
+				mmu->WriteByte(0xFF0F, reg_if);
+			}
+			else
+				tima++;
 
 			timer_cycles -= cycle_threshold;
+
 		}
 
 		mmu->WriteByte(0xFF05, tima);
 
 	}
 
-	TotalCyclesCounter += CycleCounter;
-	CycleCounter = 0;
+	TotalCyclesCounter += cycles;
 
 }
 
@@ -345,7 +317,7 @@ void Cpu::UpdatePpu()
 void Cpu::Execute(uint8_t op)
 {
 	OpsCounter++;
-	CycleCounter += CyclesPerOp[op];
+	CycleCounter = CyclesPerOp[op];
 
 	//EI enables interrupts one instruction late
 	InterruptsEnabled = (InterruptsEnabled || EI_DelayedInterruptEnableFlag);
@@ -668,7 +640,7 @@ void Cpu::Execute(uint8_t op)
 	
 	case(0xD0): if (!flags.carry) { CycleCounter += 12; PC = Pop(); } break; // Ret NC
 	case(0xD2): u16iv = mmu->ReadWord(PC); PC += 2; if (!flags.carry) { CycleCounter += 4; PC = u16iv; } break; // JP NC, u16
-	case(0xD4): u16iv = mmu->ReadWord(PC); PC += 2; if (!flags.carry) { CycleCounter += 4; Push(PC); PC = u16iv; } break; //Call NC, u16
+	case(0xD4): u16iv = mmu->ReadWord(PC); PC += 2; if (!flags.carry) { CycleCounter += 12; Push(PC); PC = u16iv; } break; //Call NC, u16
 	case(0xD8): if (flags.carry) { CycleCounter += 12; PC = Pop(); } break; // Ret C
 	case(0xD9): PC = Pop(); InterruptsEnabled = true; break; //RETI, Return and Enable Interrupts Immediately
 	case(0xDA): u16iv = mmu->ReadWord(PC); PC += 2; if (flags.carry) { CycleCounter += 4; PC = u16iv; } break; //JP C, u16
@@ -1029,12 +1001,12 @@ void Cpu::PrintCPUState()
 	<< std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(PC+2) << ' '
 	<< std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(PC+3)
 	<< ")"
-	<< " IME: " << (int)InterruptsEnabled
-	<< " IE: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFFFF)
+	//<< " IME: " << (int)InterruptsEnabled
+	//<< " IE: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFFFF)
 	<< " IF: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF0F)
 	<< " DIV: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF04)
 	<< " TIMA: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF05)
-	<< " TMA: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF06)
+	//<< " TMA: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF06)
 	<< " TAC: " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (int)mmu->ReadByte(0xFF07)
 	<< '\n';
 }
