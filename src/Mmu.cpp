@@ -30,18 +30,21 @@ uint8_t Mmu::ReadByte(uint16_t addr)
 		return ROM[addr];
 	if (addr < 0x8000) //ROM, bank N
 		return ROM[0x4000 * currentRomBank + (addr - 0x4000)];
+	if (addr > 0x9FFF && addr < 0xC000) //external cartridge ram (possibly banked)
+		return Memory[addr]; //TODO: external ram banks
 	if (addr > 0xDFFF && addr < 0xFE00) //echo ram
 		return Memory[addr - 0x2000];
-	if (addr > 0xFE9F && addr < 0xFF00)
-		return 0x00; //TODO: prohibited area. during OAM, return FF and trigger sprite bug. else return 00
+	if (addr > 0xFE9F && addr < 0xFF00) // prohibited area. todo: during OAM, return FF and trigger sprite bug. else return 00
+		return 0x00; 
 
 	return Memory[addr]; //just return the mapped memory
 }
 
 void Mmu::WriteByte(uint16_t addr, uint8_t val)
 {
-	//there should be oodles of logic here since a "write" to a location is used to toggle all kinds of things on the gameboy
-	
+	if (addr < 0x8000) // ROM area. todo: should be handled by the MBC
+		return;
+
 	if (addr == 0xFF01) //TODO: implement serial. Stubbing serial output for now in order to read the results of blargg's test roms
 	{
 		std::cout << (char)val << std::flush;
@@ -62,26 +65,39 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		return;
 	}
 
-	if (addr == 0xFF50 && val)
+	if (addr == 0xFF41) //lcd stat
 	{
-		bootRomEnabled = false;
+		Memory[0xFF41] = (val & 0xF8); //mask off the bottom 3 bits which are read only
+		return;
 	}
 
-	//if(addr == 0xFF0F)
-	//{
-	//	std::cout << "Set IF: " << (int)val << std::endl;
-	//	Memory[addr] = val;
-	//}
+	if (addr == 0xFF44) //LY, read only
+		return;
 
-	//if (addr == 0xFFFF)
-	//{
-	//	std::cout << "Set IE: " << (int)val << std::endl;
-	//	Memory[addr] = val;
-	//}
+	if (addr == 0xFF50) //DMG Bootrom enable. Zero on startup. Non-zero disables bootrom
+	{
+		if (bootRomEnabled && (val & 0x01))
+		{
+			bootRomEnabled = false;
+			Memory[0xFF50] = 0x01;
+		}
+		return;
+	}
+
+	if (addr > 0xDFFF && addr < 0xFE00) //echo ram
+	{
+		Memory[addr - 0x2000] = val;
+		return;
+	}
+
+	if (addr > 0xFE9F && addr < 0xFF00) //prohibited area
+		return;
 
 	//TODO: this is not even close to right
 	if(addr > 0x7FFF)
 		Memory[addr] = val;
+
+	return;
 }
 
 uint16_t Mmu::ReadWord(uint16_t addr)
@@ -111,8 +127,20 @@ bool Mmu::isBootRomEnabled()
 	return bootRomEnabled;
 }
 
-//special function meant for internal use by the timer update. Correctly persists DIV val
-void Mmu::SaveDiv(uint8_t val)
+////special function meant for internal use by the timer update. Correctly persists DIV val instead of writing 0
+//void Mmu::SaveDiv(uint8_t val)
+//{
+//	Memory[0xFF04] = val;
+//}
+//
+////special function meant for use by the ppu. Writes STAT value as given, instead of masking off the bottom read only bits
+//void Mmu::SaveStat(uint8_t val)
+//{
+//	Memory[0xFF41] = val;
+//}
+
+//bypass safety and write directly to address in memory
+void Mmu::WriteByteDirect(uint16_t addr, uint8_t val)
 {
-	Memory[0xFF04] = val;
+	Memory[addr] = val;
 }

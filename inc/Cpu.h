@@ -8,6 +8,8 @@ public:
 	Cpu(Mmu* __mmu, Ppu* __ppu);
 	void Tick();
 	bool GetStopped();
+	uint64_t GetTotalCycles();
+	void ResetTotalCycles();
 private:
 	Mmu* mmu;
 	Ppu* ppu;
@@ -16,21 +18,52 @@ private:
 
 	void PrintCPUState();
 
-	struct {
-		uint8_t F{ 0 };
-		uint8_t A{ 0 };
-		uint8_t C{ 0 };
-		uint8_t B{ 0 };
-		uint8_t E{ 0 };
-		uint8_t D{ 0 };
-		uint8_t L{ 0 };
-		uint8_t H{ 0 };
-	} Regs;
+	//struct {
+	//	uint8_t F{ 0 };
+	//	uint8_t A{ 0 };
+	//	uint8_t C{ 0 };
+	//	uint8_t B{ 0 };
+	//	uint8_t E{ 0 };
+	//	uint8_t D{ 0 };
+	//	uint8_t L{ 0 };
+	//	uint8_t H{ 0 };
+	//} Regs;
 
-	uint16_t& AF = *((uint16_t*) &(Regs.F)); //assuming little endian
-	uint16_t& BC = *((uint16_t*) &(Regs.C));
-	uint16_t& DE = *((uint16_t*) &(Regs.E));
-	uint16_t& HL = *((uint16_t*) &(Regs.L));
+	//uint16_t& AF = *((uint16_t*) &(Regs.F));
+	//uint16_t& BC = *((uint16_t*) &(Regs.C));
+	//uint16_t& DE = *((uint16_t*) &(Regs.E));
+	//uint16_t& HL = *((uint16_t*) &(Regs.L));
+
+	struct {
+		union {
+			struct {
+				uint8_t F;
+				uint8_t A;
+			};
+			uint16_t AF;
+		};
+		union {
+			struct {
+				uint8_t C;
+				uint8_t B;
+			};
+			uint16_t BC;
+		};
+		union {
+			struct {
+				uint8_t E;
+				uint8_t D;
+			};
+			uint16_t DE;
+		};
+		union {
+			struct {
+				uint8_t L;
+				uint8_t H;
+			};
+			uint16_t HL;
+		};
+	} Regs;
 
 	uint16_t SP{ 0 };
 	uint16_t PC{ 0 };
