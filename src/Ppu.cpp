@@ -133,6 +133,8 @@ void Ppu::SetMode(uint8_t mode)
 		reg_if |= 0x01;
 		mmu->WriteByte(0xFF0F, reg_if);
 
+		windowCounter = 0;
+
 		break;
 	}
 	case(2): //enter oam search
@@ -260,7 +262,54 @@ void Ppu::RenderLine()
 	}
 
 	//render window
+	uint8_t wY = mmu->ReadByte(0xFF4A);
+	uint8_t wX = mmu->ReadByte(0xFF4B);
 
+	if ((lcdc & WINDOW_ENABLE) && (lcdc & BG_ENABLE) && (wY <= currentLine))
+	{
+		uint8_t windowDrawn = 0;
+		uint16_t winMapBaseAddr = (lcdc & 0x40) ? 0x9C00 : 0x9800;
+		uint16_t winDataBaseAddr = (lcdc & 0x10) ? 0x8000 : 0x9000;
+		uint8_t u_winDataIndex = 0;
+		int8_t s_winDataIndex = 0;
+
+		//uint8_t winMapY = ((currentLine - wY) % 256) >> 3; // Window Map Tile Y
+		//uint8_t tileY = ((currentLine - wY) % 256) & 0x07; // the number of lines from the top of the tile
+
+		uint8_t winMapY = (windowCounter % 256) >> 3; // Window Map Tile Y
+		uint8_t tileY = (windowCounter % 256) & 0x07; // the number of lines from the top of the tile
+
+		for (int screenX = 0; screenX < 160; screenX++)
+		{
+			if (screenX + 7 < wX)
+				continue;
+
+			windowDrawn |= 1;
+
+			uint8_t winMapX = (((screenX + 7) - wX) % 256) >> 3; // Window Map Tile X
+			uint8_t tileX = (((screenX + 7) - wX) % 256) & 0x07; // number of pixels from left to right on the tile
+			uint8_t tileDataH, tileDataL;
+
+			if (winDataBaseAddr == 0x8000)
+			{
+				u_winDataIndex = mmu->ReadByte(winMapBaseAddr + (winMapY * 32) + winMapX);
+
+				tileDataL = mmu->ReadByte(winDataBaseAddr + (u_winDataIndex * 16) + (tileY * 2));
+				tileDataH = mmu->ReadByte(winDataBaseAddr + (u_winDataIndex * 16) + (tileY * 2) + 1);
+			}
+			else
+			{
+				s_winDataIndex = mmu->ReadByte(winMapBaseAddr + (winMapY * 32) + winMapX);
+
+				tileDataL = mmu->ReadByte(winDataBaseAddr + (s_winDataIndex * 16) + (tileY * 2));
+				tileDataH = mmu->ReadByte(winDataBaseAddr + (s_winDataIndex * 16) + (tileY * 2) + 1);
+			}
+
+			WorkingFrameBuffer[currentLine * 160 + screenX] = bgp[(((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01))];
+		}
+
+		windowCounter += windowDrawn;
+	}
 
 	//render sprites
 

@@ -57,17 +57,9 @@ int main(int argc, char* argv[])
 	}
 	inFile.close();
 
-	/*for (int y = 0; y < 128; y++)
-	{
-		for (int x = 0; x < 16; x++)
-		{
-			std::cout << " " << std::hex << std::setfill('0') << std::uppercase << std::setw(2) << (unsigned)mmu->GetROM()[y * 16 + x];
-		}
-		std::cout << std::endl;
-	}*/
-
 	const uint32_t palette_gbp_gray[4] = { 0xFFCDDBE0, 0xFF949FA8, 0xFF666B70, 0xFF262B2B };
 	const uint32_t palette_gbp_green[4] = { 0xFFB4F4DB, 0xFF96C3AB, 0xFF78927B, 0xFF5A624C };
+	
 	uint32_t* screen = new uint32_t[160 * 144];
 
 	uint32_t palette[4];

@@ -12,6 +12,7 @@ private:
 	uint64_t PpuCycles{ 0 };
 	uint8_t currentMode{ 2 };
 	uint8_t currentLine{ 0 };
+	uint8_t windowCounter{ 0 };
 
 	const uint16_t OAM_CYCLES{ 80 };
 	uint16_t DRAW_CYCLES{ 172 };
