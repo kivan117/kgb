@@ -59,6 +59,10 @@ int main(int argc, char* argv[])
 
 	const uint32_t palette_gbp_gray[4] = { 0xFFCDDBE0, 0xFF949FA8, 0xFF666B70, 0xFF262B2B };
 	const uint32_t palette_gbp_green[4] = { 0xFFB4F4DB, 0xFF96C3AB, 0xFF78927B, 0xFF5A624C };
+	const uint32_t palette_platinum[4] = { 0xFFE8F0E0, 0xFFB0C0A8, 0xFF687850, 0xFF303018 };
+	const uint32_t palette_luxa[4] = { 0xFFFFE6E6, 0xFFE6BEBE, 0xFF6E5050, 0xFF3C1E1E };
+	const uint32_t palette_bgb[4] = { 0xFFD0F8E0, 0xFF70C088, 0xFF566834, 0xFF201808 };
+	const uint32_t palette_mist[4] = { 0xFFC2F0C4, 0xFFA8B95A, 0xFF6E601E, 0xFF001B2D };
 	
 	uint32_t* screen = new uint32_t[160 * 144];
 

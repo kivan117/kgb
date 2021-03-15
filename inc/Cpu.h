@@ -156,6 +156,6 @@ private:
 	};
 
 	void UpdatePpu();
-
+	void UpdateMmu();
 };
 

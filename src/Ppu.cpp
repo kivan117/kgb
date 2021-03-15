@@ -1,4 +1,5 @@
 #include "Ppu.h"
+#include <algorithm>
 
 Ppu::Ppu(Mmu* __mmu) : mmu(__mmu)
 {
@@ -7,13 +8,14 @@ Ppu::Ppu(Mmu* __mmu) : mmu(__mmu)
 
 void Ppu::Tick(uint16_t cycles)
 {
-	uint8_t lcdc = mmu->ReadByte(0xFF40);
-	uint8_t stat = mmu->ReadByte(0xFF41);
+	uint8_t lcdc = mmu->ReadByteDirect(0xFF40);
+	uint8_t stat = mmu->ReadByteDirect(0xFF41);
 
 	if (!(lcdc & LCD_ENABLE)) //todo: not sure this is right
 		return;
 
 	PpuCycles += cycles;
+	PpuTotalCycles += cycles;
 
 	switch (currentMode)
 	{
@@ -83,7 +85,7 @@ void Ppu::Tick(uint16_t cycles)
 
 void Ppu::SetMode(uint8_t mode)
 {
-	uint8_t stat = mmu->ReadByte(0xFF41);
+	uint8_t stat = mmu->ReadByteDirect(0xFF41);
 
 	if (mode > 3)
 	{
@@ -110,7 +112,7 @@ void Ppu::SetMode(uint8_t mode)
 		if ((stat & STAT_HBLANK_ENABLE) && statIntAvail)
 		{
 			statIntAvail = false;
-			uint8_t reg_if = mmu->ReadByte(0xFF0F);
+			uint8_t reg_if = mmu->ReadByteDirect(0xFF0F);
 			reg_if |= 0x02;
 			mmu->WriteByte(0xFF0F, reg_if);
 		}
@@ -124,12 +126,12 @@ void Ppu::SetMode(uint8_t mode)
 		if ((stat & STAT_VBLANK_ENABLE) && statIntAvail) //if enabled, request stat interrupt due to vblank
 		{
 			statIntAvail = false;
-			uint8_t reg_if = mmu->ReadByte(0xFF0F);
+			uint8_t reg_if = mmu->ReadByteDirect(0xFF0F);
 			reg_if |= 0x02;
 			mmu->WriteByte(0xFF0F, reg_if);
 		}
 
-		uint8_t reg_if = mmu->ReadByte(0xFF0F); // request v-blank interrupt
+		uint8_t reg_if = mmu->ReadByteDirect(0xFF0F); // request v-blank interrupt
 		reg_if |= 0x01;
 		mmu->WriteByte(0xFF0F, reg_if);
 
@@ -139,13 +141,16 @@ void Ppu::SetMode(uint8_t mode)
 	}
 	case(2): //enter oam search
 	{
+		SpriteSearch();
+
 		if ((stat & STAT_OAM_ENABLE) && statIntAvail)
 		{
 			statIntAvail = false;
-			uint8_t reg_if = mmu->ReadByte(0xFF0F);
+			uint8_t reg_if = mmu->ReadByteDirect(0xFF0F);
 			reg_if |= 0x02;
 			mmu->WriteByte(0xFF0F, reg_if);
 		}
+
 		break;
 	}
 	case(3): //enter draw mode
@@ -171,15 +176,14 @@ void Ppu::SetLine(uint8_t line)
 		currentLine = line;
 
 	//update LY
-	uint8_t ly = currentLine;
-	mmu->WriteByteDirect(0xFF44, ly);
+	mmu->WriteByteDirect(0xFF44, currentLine);
 }
 
 void Ppu::CheckLYC()
 {
-	uint8_t stat = mmu->ReadByte(0xFF41);
-	uint8_t ly = mmu->ReadByte(0xFF44);
-	uint8_t lyc = mmu->ReadByte(0xFF45);
+	uint8_t stat = mmu->ReadByteDirect(0xFF41);
+	uint8_t ly = mmu->ReadByteDirect(0xFF44);
+	uint8_t lyc = mmu->ReadByteDirect(0xFF45);
 
 	stat &= 0xFB; //clear the LYC coincidence flag bit
 
@@ -190,7 +194,7 @@ void Ppu::CheckLYC()
 		if ((stat & STAT_LYC_ENABLE) && statIntAvail)
 		{
 			statIntAvail = false;
-			uint8_t reg_if = mmu->ReadByte(0xFF0F);
+			uint8_t reg_if = mmu->ReadByteDirect(0xFF0F);
 			reg_if |= 0x02;
 			mmu->WriteByte(0xFF0F, reg_if);
 		}
@@ -208,15 +212,15 @@ uint8_t* Ppu::GetFramebuffer()
 
 void Ppu::RenderLine()
 {
-	uint8_t lcdc = mmu->ReadByte(0xFF40);
-	uint8_t scy = mmu->ReadByte(0xFF42);
-	uint8_t scx = mmu->ReadByte(0xFF43);
+	uint8_t lcdc = mmu->ReadByteDirect(0xFF40);
+	uint8_t scy = mmu->ReadByteDirect(0xFF42);
+	uint8_t scx = mmu->ReadByteDirect(0xFF43);
 	uint8_t bgp[4];
 
-	bgp[0] = mmu->ReadByte(0xFF47) & 0x03;
-	bgp[1] = (mmu->ReadByte(0xFF47) >> 2) & 0x03;
-	bgp[2] = (mmu->ReadByte(0xFF47) >> 4) & 0x03;
-	bgp[3] = (mmu->ReadByte(0xFF47) >> 6) & 0x03;
+	bgp[0] = mmu->ReadByteDirect(0xFF47) & 0x03;
+	bgp[1] = (mmu->ReadByteDirect(0xFF47) >> 2) & 0x03;
+	bgp[2] = (mmu->ReadByteDirect(0xFF47) >> 4) & 0x03;
+	bgp[3] = (mmu->ReadByteDirect(0xFF47) >> 6) & 0x03;
 
 	//render background
 	if (lcdc & BG_ENABLE)
@@ -237,17 +241,17 @@ void Ppu::RenderLine()
 
 			if (bgDataBaseAddr == 0x8000)
 			{
-				u_bgDataIndex = mmu->ReadByte(bgMapBaseAddr + (bgMapY * 32) + bgMapX);
+				u_bgDataIndex = mmu->ReadByteDirect(bgMapBaseAddr + (bgMapY * 32) + bgMapX);
 
-				tileDataL = mmu->ReadByte(bgDataBaseAddr + (u_bgDataIndex * 16) + (tileY * 2));
-				tileDataH = mmu->ReadByte(bgDataBaseAddr + (u_bgDataIndex * 16) + (tileY * 2) + 1);
+				tileDataL = mmu->ReadByteDirect(bgDataBaseAddr + (u_bgDataIndex * 16) + (tileY * 2));
+				tileDataH = mmu->ReadByteDirect(bgDataBaseAddr + (u_bgDataIndex * 16) + (tileY * 2) + 1);
 			}
 			else
 			{
-				s_bgDataIndex = mmu->ReadByte(bgMapBaseAddr + (bgMapY * 32) + bgMapX);
+				s_bgDataIndex = mmu->ReadByteDirect(bgMapBaseAddr + (bgMapY * 32) + bgMapX);
 
-				tileDataL = mmu->ReadByte(bgDataBaseAddr + (s_bgDataIndex * 16) + (tileY * 2));
-				tileDataH = mmu->ReadByte(bgDataBaseAddr + (s_bgDataIndex * 16) + (tileY * 2) + 1);
+				tileDataL = mmu->ReadByteDirect(bgDataBaseAddr + (s_bgDataIndex * 16) + (tileY * 2));
+				tileDataH = mmu->ReadByteDirect(bgDataBaseAddr + (s_bgDataIndex * 16) + (tileY * 2) + 1);
 			}
 
 			WorkingFrameBuffer[currentLine * 160 + screenX] = bgp[(((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01))];
@@ -262,8 +266,8 @@ void Ppu::RenderLine()
 	}
 
 	//render window
-	uint8_t wY = mmu->ReadByte(0xFF4A);
-	uint8_t wX = mmu->ReadByte(0xFF4B);
+	uint8_t wY = mmu->ReadByteDirect(0xFF4A);
+	uint8_t wX = mmu->ReadByteDirect(0xFF4B);
 
 	if ((lcdc & WINDOW_ENABLE) && (lcdc & BG_ENABLE) && (wY <= currentLine))
 	{
@@ -292,17 +296,17 @@ void Ppu::RenderLine()
 
 			if (winDataBaseAddr == 0x8000)
 			{
-				u_winDataIndex = mmu->ReadByte(winMapBaseAddr + (winMapY * 32) + winMapX);
+				u_winDataIndex = mmu->ReadByteDirect(winMapBaseAddr + (winMapY * 32) + winMapX);
 
-				tileDataL = mmu->ReadByte(winDataBaseAddr + (u_winDataIndex * 16) + (tileY * 2));
-				tileDataH = mmu->ReadByte(winDataBaseAddr + (u_winDataIndex * 16) + (tileY * 2) + 1);
+				tileDataL = mmu->ReadByteDirect(winDataBaseAddr + (u_winDataIndex * 16) + (tileY * 2));
+				tileDataH = mmu->ReadByteDirect(winDataBaseAddr + (u_winDataIndex * 16) + (tileY * 2) + 1);
 			}
 			else
 			{
-				s_winDataIndex = mmu->ReadByte(winMapBaseAddr + (winMapY * 32) + winMapX);
+				s_winDataIndex = mmu->ReadByteDirect(winMapBaseAddr + (winMapY * 32) + winMapX);
 
-				tileDataL = mmu->ReadByte(winDataBaseAddr + (s_winDataIndex * 16) + (tileY * 2));
-				tileDataH = mmu->ReadByte(winDataBaseAddr + (s_winDataIndex * 16) + (tileY * 2) + 1);
+				tileDataL = mmu->ReadByteDirect(winDataBaseAddr + (s_winDataIndex * 16) + (tileY * 2));
+				tileDataH = mmu->ReadByteDirect(winDataBaseAddr + (s_winDataIndex * 16) + (tileY * 2) + 1);
 			}
 
 			WorkingFrameBuffer[currentLine * 160 + screenX] = bgp[(((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01))];
@@ -313,17 +317,106 @@ void Ppu::RenderLine()
 
 	//render sprites
 
+	if (lcdc & SPRITE_ENABLE)
+	{
+		uint8_t spriteHeight = 8 + (((lcdc & 0x04) << 1)); // 8 or 16 tall
+		uint8_t obp_zero[4];
+		uint8_t obp_one[4];
+
+		//ignore the bottom 2 bits on the palettes since color index 0x00 is "transparent" for sprites
+		obp_zero[0] = 0x00;
+		obp_zero[1] = (mmu->ReadByteDirect(0xFF48) >> 2) & 0x03;
+		obp_zero[2] = (mmu->ReadByteDirect(0xFF48) >> 4) & 0x03;
+		obp_zero[3] = (mmu->ReadByteDirect(0xFF48) >> 6) & 0x03;
+		obp_one[0] = 0x00;
+		obp_one[1] = (mmu->ReadByteDirect(0xFF49) >> 2) & 0x03;
+		obp_one[2] = (mmu->ReadByteDirect(0xFF49) >> 4) & 0x03;
+		obp_one[3] = (mmu->ReadByteDirect(0xFF49) >> 6) & 0x03;
+
+		uint8_t minX = 0; //lowest x value that can be drawn over
+
+		for (int i = 0; i < lineSpriteCount; i++)
+		{
+			if (lineSprites[i].x == 0 || lineSprites[i].x >= 168) //sprite is off screen
+				continue;
+
+			uint8_t tileY = lineSprites[i].yflip ? ((spriteHeight - 1) - (currentLine - (lineSprites[i].y - 16))) & (spriteHeight - 1) : (currentLine - (lineSprites[i].y - 16)) & (spriteHeight - 1);
+
+			uint8_t tileDataL = mmu->ReadByteDirect(0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2));
+			uint8_t tileDataH = mmu->ReadByteDirect(0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2) + 1);
+
+			int16_t coordX = lineSprites[i].x - 8;
+
+			for (int subX = 0; subX < 8; subX++)
+			{
+				if (coordX + subX <= minX)
+					continue;
+
+				uint8_t tileX = lineSprites[i].xflip ? 7 - subX : subX;
+				uint8_t color = (((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01));
+
+				if (!color) //transparent
+					continue;
+
+				minX = coordX + subX;
+
+				if (lineSprites[i].bg_priority && (WorkingFrameBuffer[currentLine * 160 + coordX + subX] != 0)) //don't draw over background, but do move minX
+					continue;
+
+				if (lineSprites[i].palette)
+					WorkingFrameBuffer[currentLine * 160 + coordX + subX] = obp_one[color];
+				else
+					WorkingFrameBuffer[currentLine * 160 + coordX + subX] = obp_zero[color];
+
+			}
+		}
+
+	}
+
 }
 
 void Ppu::RenderFrame()
 {
-	//for (int y = 0; y < 144; y++)
-	//{
-	//	for(int x = 0; x < 160; x++)
-	//		std::cout << (int)WorkingFrameBuffer[y * 160 + x];
-
-	//	std::cout << std::endl;
-	//}
-	//std::cout << '\n' << '\n' << std::endl;
 	memcpy(FrameBuffer, WorkingFrameBuffer, sizeof(uint8_t) * 160 * 144);
+}
+
+void Ppu::SpriteSearch()
+{
+	lineSpriteCount = 0;
+	lineSprites.fill(Sprite());
+
+	uint16_t OAMBaseAddr = 0xFE00;
+	uint8_t lcdc = mmu->ReadByteDirect(0xFF40);
+
+	if (!(lcdc & SPRITE_ENABLE))
+		return;
+
+	uint8_t spriteHeight = 8 + ((lcdc & 0x04) << 1);
+	for (int i = 0; i < 40; i++)
+	{
+		uint8_t offset = i * 4;
+		
+		allSprites[i].y = mmu->ReadByteDirect(OAMBaseAddr + offset);
+		allSprites[i].x = mmu->ReadByteDirect(OAMBaseAddr + offset + 1);
+		allSprites[i].tile_id = mmu->ReadByteDirect(OAMBaseAddr + offset + 2);
+		if (spriteHeight > 8) { allSprites[i].tile_id &= 0xFE; };
+		allSprites[i].bg_priority = (mmu->ReadByteDirect(OAMBaseAddr + offset + 3) & 0x80);
+		allSprites[i].yflip = (mmu->ReadByteDirect(OAMBaseAddr + offset + 3) & 0x40);
+		allSprites[i].xflip = (mmu->ReadByteDirect(OAMBaseAddr + offset + 3) & 0x20);
+		allSprites[i].palette = (mmu->ReadByteDirect(OAMBaseAddr + offset + 3) & 0x10) >> 4;
+	}
+	for (int i = 0; i < 40 && lineSpriteCount < 10; i++)
+	{
+		if (currentLine + 16 >= allSprites[i].y && currentLine + 16 < allSprites[i].y + spriteHeight) //this sprite crosses the current draw line
+		{
+			lineSprites[lineSpriteCount] = allSprites[i];
+			lineSprites[lineSpriteCount].index = lineSpriteCount;
+			lineSpriteCount++;
+		}
+	}
+	
+	if(lineSpriteCount > 0)
+		std::sort(lineSprites.begin(), lineSprites.end());
+
+	return;
 }

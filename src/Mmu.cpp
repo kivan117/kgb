@@ -22,7 +22,40 @@ Mmu::Mmu()
 	ROM[0xFF00] = 0xFF;
 }
 
+void Mmu::Tick(uint16_t cycles)
+{
+	if (!DMAInProgress)
+		return;
+
+	uint16_t totalCycles = DMACycles + cycles;
+
+	while (DMACycles < totalCycles && DMACycles <= 644)
+	{
+		DMACycles+=4;
+		if (DMACycles < 8)
+			continue;
+		if (DMACycles % 4 == 0)
+			Memory[0xFE00 + (DMACycles / 4) - 2] = ReadByteDirect(DMABaseAddr + (DMACycles / 4) - 2);
+	}
+
+	if (DMACycles >= 644)
+	{
+		DMACycles = 0;
+		DMAInProgress = false;
+	}
+}
+
 uint8_t Mmu::ReadByte(uint16_t addr)
+{
+	if (DMAInProgress && addr < 0xFF80) //DMA conflict on bus and not in HRAM
+	{
+		return ReadByteDirect(DMABaseAddr + (DMACycles / 4) - 2);
+	}
+
+	return ReadByteDirect(addr);
+}
+
+uint8_t Mmu::ReadByteDirect(uint16_t addr)
 {
 	if (addr < 0x100 && bootRomEnabled) //Boot Rom
 		return DMGBootROM[addr];
@@ -45,10 +78,33 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 	if (addr < 0x8000) // ROM area. todo: should be handled by the MBC
 		return;
 
+	if (addr >= 0xFE00 && addr <= 0xFE9F) // OAM
+	{
+		Memory[addr] = val;
+		return;
+	}
+
+	if (addr == 0xFF00) //joypad input
+	{
+		uint8_t joypadSelect = val & 0x30; //get only the 2 bits for mode select
+		Memory[0xFF00] &= 0xCF; // clear the 2 select bits. 0xFF00 & 1100 1111
+		Memory[0xFF00] |= joypadSelect; //set the new joypad mode
+		return;
+	}
+	
 	if (addr == 0xFF01) //TODO: implement serial. Stubbing serial output for now in order to read the results of blargg's test roms
 	{
-		std::cout << (char)val << std::flush;
+		//std::cout << (char)val << std::flush;
 		Memory[addr] = val;
+		return;
+	}
+	if (addr == 0xFF02)
+	{
+		if (val == 0x81)
+		{
+			std::cout << (char)Memory[0xFF01] << std::flush;
+			Memory[0xFF01] = 0x00;
+		}
 		return;
 	}
 
@@ -73,6 +129,15 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 
 	if (addr == 0xFF44) //LY, read only
 		return;
+
+	if (addr == 0xFF46) //DMA control
+	{
+		Memory[0xFF46] = val;
+		DMABaseAddr = val << 8;
+		DMACycles = 0;
+		DMAInProgress = true;
+		return;
+	}
 
 	if (addr == 0xFF50) //DMG Bootrom enable. Zero on startup. Non-zero disables bootrom
 	{
@@ -102,7 +167,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 
 uint16_t Mmu::ReadWord(uint16_t addr)
 {
-	return (uint16_t)((ReadByte(addr + 1) << 8) | ReadByte(addr)); //return the 16bit word at addr, flip from little endian to big endian
+	return (uint16_t)((ReadByteDirect(addr + 1) << 8) | ReadByteDirect(addr)); //return the 16bit word at addr, flip from little endian to big endian
 }
 
 void Mmu::WriteWord(uint16_t addr, uint16_t val)
@@ -127,17 +192,10 @@ bool Mmu::isBootRomEnabled()
 	return bootRomEnabled;
 }
 
-////special function meant for internal use by the timer update. Correctly persists DIV val instead of writing 0
-//void Mmu::SaveDiv(uint8_t val)
-//{
-//	Memory[0xFF04] = val;
-//}
-//
-////special function meant for use by the ppu. Writes STAT value as given, instead of masking off the bottom read only bits
-//void Mmu::SaveStat(uint8_t val)
-//{
-//	Memory[0xFF41] = val;
-//}
+bool Mmu::isDMAInProgress()
+{
+	return DMAInProgress;
+}
 
 //bypass safety and write directly to address in memory
 void Mmu::WriteByteDirect(uint16_t addr, uint8_t val)

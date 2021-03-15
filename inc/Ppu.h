@@ -1,5 +1,6 @@
 #pragma once
 #include <iostream>
+#include <array>
 #include "Mmu.h"
 class Ppu
 {
@@ -10,6 +11,7 @@ public:
 private:
 	Mmu* mmu;
 	uint64_t PpuCycles{ 0 };
+	uint64_t PpuTotalCycles{ 0 };
 	uint8_t currentMode{ 2 };
 	uint8_t currentLine{ 0 };
 	uint8_t windowCounter{ 0 };
@@ -40,7 +42,29 @@ private:
 
 	void RenderFrame();
 
+	void SpriteSearch();
+
 	uint8_t FrameBuffer[160 * 144] = { 0 };
 	uint8_t WorkingFrameBuffer[160 * 144] = { 0 };
+
+	struct Sprite {
+		uint8_t index{ 10 };
+		uint8_t x{ 255 };
+		uint8_t y{ 255 };
+		bool xflip{ false };
+		bool yflip{ false };
+		bool bg_priority{ false };
+		uint8_t palette{ 0 };
+		uint8_t tile_id{ 0 };
+
+		inline bool operator <(const Sprite& other) const { if (x != other.x) { return x < other.x; } return index < other.index; };
+
+	};
+
+	std::array<Sprite, 40> allSprites;
+
+	std::array<Sprite, 10> lineSprites;
+
+	uint8_t lineSpriteCount{ 0 };
 };
 

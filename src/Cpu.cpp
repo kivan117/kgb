@@ -28,7 +28,7 @@ Cpu::Cpu(Mmu* __mmu, Ppu* __ppu) : mmu(__mmu), ppu(__ppu)
 	}
 
 	//mmu->WriteByteDirect(0xFF44, 0x90); //stub LY to 0x90 (line 144, begin VBlank)
-	mmu->WriteByte(0xFF00, 0xFF); //stub input, no buttons pressed
+	mmu->WriteByteDirect(0xFF00, 0xFF); //stub input, no buttons pressed
 
 }
 
@@ -55,6 +55,7 @@ void Cpu::Tick()
 
 	//PrintCPUState();
 	UpdatePpu();
+	UpdateMmu();
 	//handle interrupts
 	HandleInterrupts();
 	UpdateTimers(CycleCounter);
@@ -212,8 +213,8 @@ void Cpu::HandleInterrupts()
 	//Bit 3: Serial   0x58
 	//Bit 4: Joypad   0x60
 
-	uint8_t REG_IE = mmu->ReadByte(0xFFFF);
-	uint8_t REG_IF = mmu->ReadByte(0xFF0F);
+	uint8_t REG_IE = mmu->ReadByteDirect(0xFFFF);
+	uint8_t REG_IF = mmu->ReadByteDirect(0xFF0F);
 
 	//at least 1 interrupt is both enabled and requested
 	if (REG_IE & REG_IF & 0x1F)
@@ -283,9 +284,9 @@ void Cpu::UpdateTimers(uint16_t cycles)
 	}
 
 	
-	uint8_t tima = mmu->ReadByte(0xFF05);
-	uint8_t tma  = mmu->ReadByte(0xFF06);
-	uint8_t tac  = mmu->ReadByte(0xFF07);
+	uint8_t tima = mmu->ReadByteDirect(0xFF05);
+	uint8_t tma  = mmu->ReadByteDirect(0xFF06);
+	uint8_t tac  = mmu->ReadByteDirect(0xFF07);
 	
 
 	if (tac & 0x04) // tac & 0000 0100, timer enable bit
@@ -323,6 +324,11 @@ void Cpu::UpdateTimers(uint16_t cycles)
 void Cpu::UpdatePpu()
 {
 	ppu->Tick(CycleCounter);
+}
+
+void Cpu::UpdateMmu()
+{
+	mmu->Tick(CycleCounter);
 }
 
 void Cpu::Execute(uint8_t op)
