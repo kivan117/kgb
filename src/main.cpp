@@ -57,6 +57,8 @@ int main(int argc, char* argv[])
 	}
 	inFile.close();
 
+	mmu->ParseRomHeader();
+
 	const uint32_t palette_gbp_gray[4] = { 0xFFCDDBE0, 0xFF949FA8, 0xFF666B70, 0xFF262B2B };
 	const uint32_t palette_gbp_green[4] = { 0xFFB4F4DB, 0xFF96C3AB, 0xFF78927B, 0xFF5A624C };
 	const uint32_t palette_platinum[4] = { 0xFFE8F0E0, 0xFFB0C0A8, 0xFF687850, 0xFF303018 };
@@ -251,8 +253,6 @@ int main(int argc, char* argv[])
 
 		}
 	}
-
-	delete[] screen;
 
 	return 0;
 }

@@ -59,10 +59,19 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 {
 	if (addr < 0x100 && bootRomEnabled) //Boot Rom
 		return DMGBootROM[addr];
-	if(addr < 0x4000) //ROM, Bank 0
+	if (addr < 0x4000) //ROM, Bank 0
+	{
+		if (currentMBC == MBC1 && mbc1Mode == 0x01 && totalRomBanks > 0x20)
+		{
+			return ROM[0x4000 * ((mbc1_hiBank << 5) % totalRomBanks )+ (addr)];
+		}
+
 		return ROM[addr];
+	}
 	if (addr < 0x8000) //ROM, bank N
-		return ROM[0x4000 * currentRomBank + (addr - 0x4000)];
+	{
+		return ROM[(0x4000 * (currentRomBank % totalRomBanks)) + (addr - 0x4000)];
+	}
 	if (addr > 0x9FFF && addr < 0xC000) //external cartridge ram (possibly banked)
 		return Memory[addr]; //TODO: external ram banks
 	if (addr > 0xDFFF && addr < 0xFE00) //echo ram
@@ -92,7 +101,27 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 void Mmu::WriteByte(uint16_t addr, uint8_t val)
 {
 	if (addr < 0x8000) // ROM area. todo: should be handled by the MBC
-		return;
+	{
+		switch (currentMBC)
+		{
+		case(MBC_TYPE::MBC1):
+			WriteMBC1(addr, val);
+			return;
+		case(MBC_TYPE::MBC2):
+			WriteMBC2(addr, val);
+			return;
+		case(MBC_TYPE::MBC3):
+			WriteMBC3(addr, val);
+			return;
+		case(MBC_TYPE::MBC5):
+			WriteMBC5(addr, val);
+			return;
+		case(MBC_TYPE::NONE):
+		case(MBC_TYPE::UNKNOWN):
+		default:
+			return;
+		}
+	}
 
 	if (addr >= 0xFE00 && addr <= 0xFE9F) // OAM
 	{
@@ -217,4 +246,177 @@ bool Mmu::isDMAInProgress()
 void Mmu::WriteByteDirect(uint16_t addr, uint8_t val)
 {
 	Memory[addr] = val;
+}
+
+void Mmu::ParseRomHeader()
+{
+	uint8_t cart_type = ROM[0x0147];
+	uint8_t rom_size  = ROM[0x0148];
+	uint8_t ram_size  = ROM[0x0149];
+
+	switch (cart_type)
+	{
+	case(0x00):
+	case(0x08):
+	case(0x09):
+		currentMBC = MBC_TYPE::NONE;
+		break;
+	case(0x01):
+	case(0x02):
+	case(0x03):
+		currentMBC = MBC_TYPE::MBC1;
+		break;
+	case(0x05):
+	case(0x06):
+		currentMBC = MBC_TYPE::MBC2;
+		break;
+	case(0x0F):
+	case(0x10):
+	case(0x11):
+	case(0x12):
+	case(0x13):
+		currentMBC = MBC_TYPE::MBC3;
+		break;
+	case(0x19):
+	case(0x1A):
+	case(0x1B):
+	case(0x1C):
+	case(0x1D):
+	case(0x1E):
+		currentMBC = MBC_TYPE::MBC5;
+		break;
+	default:
+		currentMBC = MBC_TYPE::UNKNOWN; //several weird tpyes that I'm not even going to try to support
+		break;
+	}
+
+	switch (rom_size)
+	{
+	case(0x01):
+		totalRomBanks = 4;
+		break;
+	case(0x02):
+		totalRomBanks = 8;
+		break;
+	case(0x03):
+		totalRomBanks = 16;
+		break;
+	case(0x04):
+		totalRomBanks = 32;
+		break;
+	case(0x05):
+		totalRomBanks = 64;
+		break;
+	case(0x06):
+		totalRomBanks = 128;
+		break;
+	case(0x07):
+		totalRomBanks = 256;
+		break;
+	case(0x08):
+		totalRomBanks = 512;
+		break;
+	case(0x00):
+	default:
+		totalRomBanks = 2;
+		break;
+	}
+
+	switch (ram_size)
+	{
+	case(0x02):
+		totalRamBanks = 1;
+		break;
+	case(0x03):
+		totalRamBanks = 4;
+		break;
+	case(0x04):
+		totalRamBanks = 16;
+		break;
+	case(0x05):
+		totalRamBanks = 8;
+		break;
+	case(0x00):
+	case(0x01):
+	default:
+		totalRamBanks = 0;
+		break;
+	}
+
+	if (totalRamBanks)
+	{
+		if (CartRam.size())
+			CartRam.clear();
+		CartRam.reserve(1024 * 8 * totalRamBanks);
+	}
+
+	return;
+}
+
+void Mmu::WriteMBC1(uint16_t addr, uint8_t val)
+{
+	if (addr < 0x2000) //0x0000 to 0x1FFF cartridge ram enable/disable
+	{
+		uint8_t enable = val & 0x0A;
+		if (enable == 0x0A)
+			isCartRamEnabled = true;
+		else
+			isCartRamEnabled = false;
+		return;
+	}
+	if (addr < 0x4000) //0x2000 to 0x3FFF rom bank number
+	{
+		mbc1_lowBank = val & 0x1F; //TODO: there's a much more clever way to do this bitmask but i'm sleepy
+		if(mbc1_lowBank == 0x00)
+			mbc1_lowBank = 0x01;
+		if (totalRomBanks <= 16 && totalRomBanks > 8)
+			mbc1_lowBank &= 0x0F;
+		else if (totalRomBanks <= 8 && totalRomBanks > 4)
+			mbc1_lowBank &= 0x07;
+		else if (totalRomBanks <= 4)
+			mbc1_lowBank &= 0x03;
+
+		if (mbc1Mode == 0 && totalRomBanks > 0x20)
+			currentRomBank = (mbc1_hiBank << 5) | mbc1_lowBank;
+		else
+			currentRomBank = mbc1_lowBank;
+		return;
+	}
+	if (addr < 0x6000) // RAM bank number / upper rom bank number
+	{
+		mbc1_hiBank = val & 0x03;
+
+		if (mbc1Mode == 0 && totalRomBanks > 0x20)
+		{
+			currentRomBank = (mbc1_hiBank << 5) | mbc1_lowBank;
+		}
+		else if (mbc1Mode == 1 && totalRamBanks > 1)
+			currentRamBank = mbc1_hiBank;
+		else if (mbc1Mode == 1 && totalRomBanks > 0x20)
+		{
+			currentRomBank = (mbc1_hiBank << 5) | mbc1_lowBank;
+		}
+
+		return;
+	}
+	if (addr < 0x8000) //bank mode select
+	{
+		mbc1Mode = val & 0x01;
+	}
+	return;
+}
+
+void Mmu::WriteMBC2(uint16_t addr, uint8_t val)
+{
+	return;
+}
+
+void Mmu::WriteMBC3(uint16_t addr, uint8_t val)
+{
+	return;
+}
+
+void Mmu::WriteMBC5(uint16_t addr, uint8_t val)
+{
+	return;
 }

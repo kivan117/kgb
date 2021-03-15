@@ -12,7 +12,11 @@ void Ppu::Tick(uint16_t cycles)
 	uint8_t stat = mmu->ReadByteDirect(0xFF41);
 
 	if (!(lcdc & LCD_ENABLE)) //todo: not sure this is right
+	{
+		if(currentMode)
+			SetMode(0);
 		return;
+	}
 
 	PpuCycles += cycles;
 	PpuTotalCycles += cycles;

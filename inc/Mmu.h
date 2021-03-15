@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <vector>
 
 class Mmu
 {
@@ -19,7 +20,10 @@ public:
 	bool isDMAInProgress();
 
 	void WriteByteDirect(uint16_t addr, uint8_t val);
+
 	uint8_t	ReadByteDirect(uint16_t addr);
+
+	void ParseRomHeader();
 
 	//void SaveDiv(uint8_t val);
 	//void SaveStat(uint8_t val);
@@ -48,7 +52,11 @@ private:
 	uint16_t DMACycles = 0x0000;
 	uint16_t DMABaseAddr = 0x0000;
 
-	uint8_t currentRomBank = 1;
+	uint16_t currentRomBank = 1;
+	uint16_t totalRomBanks  = 2;
+	uint8_t currentRamBank = 1;
+	uint8_t totalRamBanks  = 1;
+	bool isCartRamEnabled = false;
 
 	uint8_t DMGBootROM[0x100] = { 0 };
 
@@ -56,7 +64,21 @@ private:
 
 	uint8_t Memory[0x10000] = { 0 }; //the currently active mapped memory
 
-	uint8_t	ReadByte(uint16_t addr, bool allowDMAConflict);
+	std::vector<uint8_t> CartRam;
+
+	enum MBC_TYPE { NONE, MBC1, MBC2, MBC3, MBC5, UNKNOWN };
+	MBC_TYPE currentMBC = MBC_TYPE::NONE;
+
+	uint8_t mbc1_lowBank = 0x01;
+	uint8_t mbc1_hiBank = 0x00;
+	uint8_t mbc1Mode = 0;
+
+	void WriteMBC1(uint16_t addr, uint8_t val);
+	void WriteMBC2(uint16_t addr, uint8_t val);
+	void WriteMBC3(uint16_t addr, uint8_t val);
+	void WriteMBC5(uint16_t addr, uint8_t val);
+
+	/*uint8_t	ReadByte(uint16_t addr, bool allowDMAConflict);*/
 
 	/*uint8_t	ReadByteDirect(uint16_t addr);*/
 };
