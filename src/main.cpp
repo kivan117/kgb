@@ -103,8 +103,132 @@ int main(int argc, char* argv[])
 		//SDL events to close window
 		while (SDL_PollEvent(&e))
 		{
-			if (e.type == SDL_QUIT)
-				userQuit = true;
+			switch (e.type)
+			{
+				case(SDL_QUIT):
+				{
+					userQuit = true;
+					break;
+				}
+				case(SDL_KEYUP):
+				{
+					switch (e.key.keysym.scancode)
+					{
+					case SDL_SCANCODE_W:
+					case SDL_SCANCODE_UP:
+						//press up;
+						mmu->Joypad.directions |= mmu->Joypad.up;
+						break;
+
+					case SDL_SCANCODE_S:
+					case SDL_SCANCODE_DOWN:
+						//press down
+						mmu->Joypad.directions |= mmu->Joypad.down;
+						break;
+
+					case SDL_SCANCODE_A:
+					case SDL_SCANCODE_LEFT:
+						//press left
+						mmu->Joypad.directions |= mmu->Joypad.left;
+						break;
+
+					case SDL_SCANCODE_D:
+					case SDL_SCANCODE_RIGHT:
+						//press right
+						mmu->Joypad.directions |= mmu->Joypad.right;
+						break;
+
+					case SDL_SCANCODE_Z:
+					case SDL_SCANCODE_N:
+						//press B
+						mmu->Joypad.buttons |= mmu->Joypad.b_button;
+						break;
+
+					case SDL_SCANCODE_X:
+					case SDL_SCANCODE_M:
+						//press A
+						mmu->Joypad.buttons |= mmu->Joypad.a_button;
+						break;
+
+					case SDL_SCANCODE_RSHIFT:
+					case SDL_SCANCODE_LSHIFT:
+						//press select
+						mmu->Joypad.buttons |= mmu->Joypad.select_button;
+						break;
+
+					case SDL_SCANCODE_RETURN:
+					case SDL_SCANCODE_LCTRL:
+					case SDL_SCANCODE_RCTRL:
+						//press start
+						mmu->Joypad.buttons |= mmu->Joypad.start_button;
+						break;
+
+					default:
+						break;
+					}
+					break;
+				}
+				case(SDL_KEYDOWN):
+				{
+					switch (e.key.keysym.scancode)
+					{
+					case SDL_SCANCODE_W:
+					case SDL_SCANCODE_UP:
+						//release up;
+						mmu->Joypad.directions &= ~(mmu->Joypad.up);
+						break;
+
+					case SDL_SCANCODE_S:
+					case SDL_SCANCODE_DOWN:
+						//release down
+						mmu->Joypad.directions &= ~(mmu->Joypad.down);
+						break;
+
+					case SDL_SCANCODE_A:
+					case SDL_SCANCODE_LEFT:
+						//release left
+						mmu->Joypad.directions &= ~(mmu->Joypad.left);
+						break;
+
+					case SDL_SCANCODE_D:
+					case SDL_SCANCODE_RIGHT:
+						//release right
+						mmu->Joypad.directions &= ~(mmu->Joypad.right);
+						break;
+
+					case SDL_SCANCODE_Z:
+					case SDL_SCANCODE_N:
+						//release B
+						mmu->Joypad.buttons &= ~(mmu->Joypad.b_button);
+						break;
+
+					case SDL_SCANCODE_X:
+					case SDL_SCANCODE_M:
+						//release A
+						mmu->Joypad.buttons &= ~(mmu->Joypad.a_button);
+						break;
+
+					case SDL_SCANCODE_RSHIFT:
+					case SDL_SCANCODE_LSHIFT:
+						//release select
+						mmu->Joypad.buttons &= ~(mmu->Joypad.select_button);
+						break;
+
+					case SDL_SCANCODE_RETURN:
+					case SDL_SCANCODE_LCTRL:
+					case SDL_SCANCODE_RCTRL:
+						//release start
+						mmu->Joypad.buttons &= ~(mmu->Joypad.start_button);
+						break;
+
+					default:
+						break;
+					}
+					break;
+				}
+				default:
+					break;
+			}
 		}
 
 		if (cpu->GetTotalCycles() > (456 * 154))

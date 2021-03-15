@@ -28,6 +28,19 @@ public:
 
 	uint8_t currentPPUMode{ 0 };
 
+	struct {
+		uint8_t buttons{ 0x0F };
+		uint8_t directions{ 0x0F };
+		uint8_t down  = 0x08;
+		uint8_t up    = 0x04;
+		uint8_t left  = 0x02;
+		uint8_t right = 0x01;
+		uint8_t start_button  = 0x08;
+		uint8_t select_button = 0x04;
+		uint8_t b_button      = 0x02;
+		uint8_t a_button      = 0x01;
+	} Joypad;
+
 private:
 	bool bootRomEnabled = true;
 

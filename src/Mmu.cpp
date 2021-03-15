@@ -70,6 +70,22 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 	if (addr > 0xFE9F && addr < 0xFF00) // prohibited area. todo: during OAM, return FF and trigger sprite bug. else return 00
 		return 0x00; 
 
+	if (addr == 0xFF00) // joypad
+	{
+		uint8_t value = Memory[0xFF00];
+
+		if (!(value & 0x20)) //buttons selected
+		{
+			value &= Joypad.buttons;
+		}
+		else if (!(value & 0x10)) //directions selected
+		{
+			value &= Joypad.directions;
+		}
+
+		return value;
+	}
+
 	return Memory[addr]; //just return the mapped memory
 }
 
