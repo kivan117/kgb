@@ -2,11 +2,13 @@
 #include <iomanip>
 #include <fstream>
 #include <string>
+#include <vector>
 #include <cassert>
 #include <SDL2/SDL.h>
 #include "Mmu.h"
 #include "Cpu.h"
 #include "Ppu.h"
+#include "Stopwatch.h"
 
 int main(int argc, char* argv[])
 {
@@ -80,33 +82,82 @@ int main(int argc, char* argv[])
 
 	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
 	SDL_SetHint(SDL_HINT_RENDER_BATCHING, "1");
-	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
 
 	SDL_Window* window = SDL_CreateWindow("kgb", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 576, SDL_WINDOW_OPENGL);
 
-	SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+	SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
 	SDL_SetRenderDrawColor(renderer, palette[0] & 0x000000FF, (palette[0] & 0x0000FF00) >> 8, (palette[0] & 0x00FF0000) >> 16, 0xFF);
 	SDL_RenderClear(renderer);
 	SDL_RenderPresent(renderer);
 
 	SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 160, 144);
-	SDL_RendererInfo renderinfo;
-	SDL_GetRendererInfo(renderer, &renderinfo);
-
+	//SDL_RendererInfo renderinfo;
+	//SDL_GetRendererInfo(renderer, &renderinfo);
+	SDL_GL_SetSwapInterval(1);
 	SDL_Event e;
 
 	bool userQuit = false;
+
+	stopwatch::Stopwatch watch;
+	stopwatch::Stopwatch title_timer;
+
+	uint64_t frame_mus, average_frame_mus = 1;
+
+	uint64_t running_frame_times[60] = { 0 };
+	uint8_t frame_time_index = 0;
+
 
 	while (!cpu->GetStopped() && !userQuit)
 	{
 		cpu->Tick();
 
-		//SDL events to close window
-		while (SDL_PollEvent(&e))
+		if (cpu->GetTotalCycles() > (456 * 154))
 		{
-			switch (e.type)
+			cpu->ResetTotalCycles();
+
+			uint8_t* fb = ppu->GetFramebuffer();
+
+			for (int y = 0; y < 144; y++)
 			{
+				for (int x = 0; x < 160; x++)
+				{
+					screen[y * 160 + x] = palette[fb[y * 160 + x]];
+				}
+			}
+
+			SDL_UpdateTexture(texture, NULL, screen, 4 * 160);
+			SDL_RenderCopy(renderer, texture, NULL, NULL);
+			SDL_RenderPresent(renderer);
+
+			frame_mus = watch.elapsed<stopwatch::mus>();
+			running_frame_times[frame_time_index] = frame_mus;
+			frame_time_index = (frame_time_index + 1) % 60;
+			if (title_timer.elapsed<stopwatch::ms>() > 500)
+			{
+				average_frame_mus = 0;
+				for (int i = 0; i < 60; i++)
+					average_frame_mus += running_frame_times[i];
+				average_frame_mus = average_frame_mus / 60;
+				title_timer.start();
+			}
+
+			
+			uint16_t fps = std::floor(1000000.0 / (double)average_frame_mus);
+			std::string title("KGB    FPS: ");
+			title += std::to_string(fps);
+			title += " uS: ";
+			title += std::to_string(average_frame_mus);
+			SDL_SetWindowTitle(window, title.c_str());
+
+			watch.start();
+
+			//SDL events to close window
+			while (SDL_PollEvent(&e))
+			{
+				switch (e.type)
+				{
 				case(SDL_QUIT):
 				{
 					userQuit = true;
@@ -230,27 +281,8 @@ int main(int argc, char* argv[])
 				}
 				default:
 					break;
-			}
-		}
-
-		if (cpu->GetTotalCycles() > (456 * 154))
-		{
-			cpu->ResetTotalCycles();
-
-			uint8_t* fb = ppu->GetFramebuffer();
-
-			for (int y = 0; y < 144; y++)
-			{
-				for (int x = 0; x < 160; x++)
-				{
-					screen[y * 160 + x] = palette[fb[y * 160 + x]];
 				}
 			}
-
-			SDL_UpdateTexture(texture, NULL, screen, 4 * 160);
-			SDL_RenderCopy(renderer, texture, NULL, NULL);
-			SDL_RenderPresent(renderer);
-
 		}
 	}
 

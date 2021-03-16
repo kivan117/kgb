@@ -73,7 +73,15 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 		return ROM[(0x4000 * (currentRomBank % totalRomBanks)) + (addr - 0x4000)];
 	}
 	if (addr > 0x9FFF && addr < 0xC000) //external cartridge ram (possibly banked)
-		return Memory[addr]; //TODO: external ram banks
+	{
+		if (currentMBC == MBC1 && isCartRamEnabled)
+		{
+			if(totalRamBanks > 1 && mbc1Mode == 1)
+				return CartRam[(uint32_t)((uint32_t)mbc1_hiBank << 13) + (addr & 0x1FFF)];
+			return CartRam[(addr & 0x1FFF)];
+		}
+		return 0xFF;// Memory[addr]; //TODO: external ram banks
+	}
 	if (addr > 0xDFFF && addr < 0xFE00) //echo ram
 		return Memory[addr - 0x2000];
 	if (addr > 0xFE9F && addr < 0xFF00) // prohibited area. todo: during OAM, return FF and trigger sprite bug. else return 00
@@ -119,6 +127,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		case(MBC_TYPE::NONE):
 		case(MBC_TYPE::UNKNOWN):
 		default:
+			//std::cout << "Blocked write to 0x" << std::hex << std::setfill('0') << std::uppercase << std::setw(4) << addr << std::endl;
 			return;
 		}
 	}
@@ -203,7 +212,19 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 	if (addr > 0xFE9F && addr < 0xFF00) //prohibited area
 		return;
 
-	//TODO: this is not even close to right
+
+	if (addr >= 0xA000 && addr < 0xC000) //external cartridge ram
+	{
+		if (currentMBC == MBC1 && isCartRamEnabled)
+		{
+			if (totalRamBanks > 1 && mbc1Mode == 1)
+				CartRam[((uint16_t)(mbc1_hiBank) << 13) + (addr & 0x1FFF)] = val;
+			else
+				CartRam[(addr & 0x1FFF)] = val;
+		}
+		return;
+	}
+
 	if(addr > 0x7FFF)
 		Memory[addr] = val;
 
@@ -347,7 +368,7 @@ void Mmu::ParseRomHeader()
 	{
 		if (CartRam.size())
 			CartRam.clear();
-		CartRam.reserve(1024 * 8 * totalRamBanks);
+		CartRam.resize(1024 * 8 * totalRamBanks);
 	}
 
 	return;

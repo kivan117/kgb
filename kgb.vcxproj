@@ -160,6 +160,7 @@
     <ClInclude Include="inc\Cpu.h" />
     <ClInclude Include="inc\Mmu.h" />
     <ClInclude Include="inc\Ppu.h" />
+    <ClInclude Include="inc\Stopwatch.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
