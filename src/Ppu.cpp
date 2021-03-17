@@ -110,7 +110,8 @@ void Ppu::SetMode(uint8_t mode)
 	{
 	case(0): //enter hblank
 	{
-		RenderLine(); //render entire line at once upon entering hblank
+		if(currentLine < 144)
+			RenderLine(); //render entire line at once upon entering hblank
 
 		//trigger stat lcd interrupt for hblank
 		if ((stat & STAT_HBLANK_ENABLE) && statIntAvail)
