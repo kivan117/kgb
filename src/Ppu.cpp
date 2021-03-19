@@ -354,7 +354,7 @@ void Ppu::RenderLine()
 
 			for (int subX = 0; subX < 8; subX++)
 			{
-				if (coordX + subX <= minX)
+				if (coordX + subX < minX)
 					continue;
 
 				uint8_t tileX = lineSprites[i].xflip ? 7 - subX : subX;
@@ -363,7 +363,7 @@ void Ppu::RenderLine()
 				if (!color) //transparent
 					continue;
 
-				minX = coordX + subX;
+				minX = coordX + subX + 1;
 
 				if (lineSprites[i].bg_priority && (WorkingFrameBuffer[currentLine * 160 + coordX + subX] != 0)) //don't draw over background, but do move minX
 					continue;

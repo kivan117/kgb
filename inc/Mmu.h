@@ -62,15 +62,15 @@ private:
 
 	uint8_t ROM[0x800000] = { 0 }; //8 MB, the max CGB rom size. Probably excessive but it should always work.
 
-	uint8_t Memory[0x10000] = { 0 }; //the currently active mapped memory
+	uint8_t Memory[0x10000] = { 0xFF }; //the currently active mapped memory
 
 	std::vector<uint8_t> CartRam;
 
 	enum MBC_TYPE { NONE, MBC1, MBC2, MBC3, MBC5, UNKNOWN };
 	MBC_TYPE currentMBC = MBC_TYPE::NONE;
 
-	uint8_t mbc1_lowBank = 0x01;
-	uint8_t mbc1_hiBank = 0x00;
+	uint8_t lowBank = 0x01;
+	uint8_t hiBank = 0x00;
 	uint8_t mbc1Mode = 0;
 
 	void WriteMBC1(uint16_t addr, uint8_t val);

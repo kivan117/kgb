@@ -63,8 +63,9 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 	{
 		if (currentMBC == MBC1 && mbc1Mode == 0x01 && totalRomBanks > 0x20)
 		{
-			return ROM[0x4000 * ((mbc1_hiBank << 5) % totalRomBanks )+ (addr)];
+			return ROM[0x4000 * ((hiBank << 5) % totalRomBanks) + (addr)];
 		}
+		//MBC3 and MBC5 always maps bank 00 here
 
 		return ROM[addr];
 	}
@@ -74,13 +75,34 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 	}
 	if (addr > 0x9FFF && addr < 0xC000) //external cartridge ram (possibly banked)
 	{
-		if (currentMBC == MBC1 && isCartRamEnabled)
+		if (!isCartRamEnabled)
+			return 0xFF;
+		switch (currentMBC)
 		{
-			if(totalRamBanks > 1 && mbc1Mode == 1)
-				return CartRam[(uint32_t)((uint32_t)mbc1_hiBank << 13) + (addr & 0x1FFF)];
+		case(MBC1):
+		{
+			if (totalRamBanks > 1 && mbc1Mode == 1)
+				return CartRam[(uint32_t)((uint32_t)hiBank << 13) + (addr & 0x1FFF)];
 			return CartRam[(addr & 0x1FFF)];
+			break;
 		}
-		return 0xFF;// Memory[addr]; //TODO: external ram banks
+		case(MBC3):
+		{
+			if (totalRamBanks > 1)
+				return CartRam[(uint32_t)((uint32_t)hiBank << 13) + (addr & 0x1FFF)];
+			return CartRam[(addr & 0x1FFF)];
+			break;
+		case(MBC5):
+		{
+			if (totalRamBanks > 1)
+				return CartRam[(uint32_t)((uint32_t)currentRamBank << 13) + (addr & 0x1FFF)];
+			return CartRam[(addr & 0x1FFF)];
+			break;
+		}
+		}
+		default:
+			break;
+		}
 	}
 	if (addr > 0xDFFF && addr < 0xFE00) //echo ram
 		return Memory[addr - 0x2000];
@@ -93,11 +115,11 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 
 		if (!(value & 0x20)) //buttons selected
 		{
-			value &= Joypad.buttons;
+			value &= 0xF0 | Joypad.buttons;
 		}
 		else if (!(value & 0x10)) //directions selected
 		{
-			value &= Joypad.directions;
+			value &= 0xF0 | Joypad.directions;
 		}
 
 		return value;
@@ -177,7 +199,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 
 	if (addr == 0xFF41) //lcd stat
 	{
-		Memory[0xFF41] = (val & 0xF8); //mask off the bottom 3 bits which are read only
+		Memory[0xFF41] = (val & 0xF8) | (Memory[0xFF41] & 0x07); //mask off the bottom 3 bits which are read only
 		return;
 	}
 
@@ -218,7 +240,21 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		if (currentMBC == MBC1 && isCartRamEnabled)
 		{
 			if (totalRamBanks > 1 && mbc1Mode == 1)
-				CartRam[((uint16_t)(mbc1_hiBank) << 13) + (addr & 0x1FFF)] = val;
+				CartRam[((uint16_t)(hiBank) << 13) + (addr & 0x1FFF)] = val;
+			else
+				CartRam[(addr & 0x1FFF)] = val;
+		}
+		if (currentMBC == MBC3 && isCartRamEnabled)
+		{
+			if (totalRamBanks > 1)
+				CartRam[((uint16_t)(hiBank) << 13) + (addr & 0x1FFF)] = val;
+			else
+				CartRam[(addr & 0x1FFF)] = val;
+		}
+		if (currentMBC == MBC5 && isCartRamEnabled)
+		{
+			if (totalRamBanks > 1)
+				CartRam[((uint16_t)(currentRamBank) << 13) + (addr & 0x1FFF)] = val;
 			else
 				CartRam[(addr & 0x1FFF)] = val;
 		}
@@ -378,7 +414,7 @@ void Mmu::WriteMBC1(uint16_t addr, uint8_t val)
 {
 	if (addr < 0x2000) //0x0000 to 0x1FFF cartridge ram enable/disable
 	{
-		uint8_t enable = val & 0x0A;
+		uint8_t enable = val & 0x0F;
 		if (enable == 0x0A)
 			isCartRamEnabled = true;
 		else
@@ -387,35 +423,35 @@ void Mmu::WriteMBC1(uint16_t addr, uint8_t val)
 	}
 	if (addr < 0x4000) //0x2000 to 0x3FFF rom bank number
 	{
-		mbc1_lowBank = val & 0x1F; //TODO: there's a much more clever way to do this bitmask but i'm sleepy
-		if(mbc1_lowBank == 0x00)
-			mbc1_lowBank = 0x01;
+		lowBank = val & 0x1F; //TODO: there's a much more clever way to do this bitmask but i'm sleepy
+		if(lowBank == 0x00)
+			lowBank = 0x01;
 		if (totalRomBanks <= 16 && totalRomBanks > 8)
-			mbc1_lowBank &= 0x0F;
+			lowBank &= 0x0F;
 		else if (totalRomBanks <= 8 && totalRomBanks > 4)
-			mbc1_lowBank &= 0x07;
+			lowBank &= 0x07;
 		else if (totalRomBanks <= 4)
-			mbc1_lowBank &= 0x03;
+			lowBank &= 0x03;
 
 		if (mbc1Mode == 0 && totalRomBanks > 0x20)
-			currentRomBank = (mbc1_hiBank << 5) | mbc1_lowBank;
+			currentRomBank = (hiBank << 5) | lowBank;
 		else
-			currentRomBank = mbc1_lowBank;
+			currentRomBank = lowBank;
 		return;
 	}
 	if (addr < 0x6000) // RAM bank number / upper rom bank number
 	{
-		mbc1_hiBank = val & 0x03;
+		hiBank = val & 0x03;
 
 		if (mbc1Mode == 0 && totalRomBanks > 0x20)
 		{
-			currentRomBank = (mbc1_hiBank << 5) | mbc1_lowBank;
+			currentRomBank = (hiBank << 5) | lowBank;
 		}
 		else if (mbc1Mode == 1 && totalRamBanks > 1)
-			currentRamBank = mbc1_hiBank;
+			currentRamBank = hiBank;
 		else if (mbc1Mode == 1 && totalRomBanks > 0x20)
 		{
-			currentRomBank = (mbc1_hiBank << 5) | mbc1_lowBank;
+			currentRomBank = (hiBank << 5) | lowBank;
 		}
 
 		return;
@@ -434,10 +470,70 @@ void Mmu::WriteMBC2(uint16_t addr, uint8_t val)
 
 void Mmu::WriteMBC3(uint16_t addr, uint8_t val)
 {
+	if (addr < 0x2000) //0x0000 to 0x1FFF cartridge ram enable/disable
+	{
+		uint8_t enable = val & 0x0F;
+		if (enable == 0x0A)
+			isCartRamEnabled = true;
+		else
+			isCartRamEnabled = false;
+		return;
+	}
+	if (addr < 0x4000) //0x2000 to 0x3FFF rom bank number
+	{
+		lowBank = val & 0x7F;
+		if (lowBank == 0x00)
+			lowBank = 0x01;
+
+		currentRomBank = lowBank;
+		return;
+	}
+	if (addr < 0x6000) // RAM bank number / rtc register select
+	{
+		if (val < 4)
+		{
+			hiBank = val;
+			currentRamBank = hiBank;
+		}
+
+		//TODO: rtc register select
+
+		return;
+	}
+	//if (addr < 0x8000) //latch clock data
+	//{
+	//	//TODO: latch clock data if writing 01 when current value is 00
+	//}
 	return;
 }
 
 void Mmu::WriteMBC5(uint16_t addr, uint8_t val)
 {
+	if (addr < 0x2000) //0x0000 to 0x1FFF cartridge ram enable/disable
+	{
+		if (val == 0x0A)
+			isCartRamEnabled = true;
+		else
+			isCartRamEnabled = false;
+		return;
+	}
+	if (addr < 0x3000) //0x2000 to 0x3FFF rom bank number
+	{
+		lowBank = val;
+
+		currentRomBank = (hiBank << 8) | lowBank;
+		return;
+	}
+	if (addr < 0x4000) // RAM bank 9th bit
+	{
+		hiBank = val & 0x01;
+		currentRomBank = (hiBank << 8) | lowBank;
+
+		return;
+	}
+	if (addr < 0x6000) //ram bank select
+	{
+		currentRamBank = val & 0x0F;
+	}
 	return;
 }
