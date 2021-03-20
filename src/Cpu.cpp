@@ -8,7 +8,7 @@ Cpu::Cpu(Mmu* __mmu, Ppu* __ppu) : mmu(__mmu), ppu(__ppu)
 	if (!mmu->isBootRomEnabled()) //fake it til you make it
 	{
 		//set cpu registers
-		Regs.AF = 0x01B0;
+		Regs.AF = 0x01B0; //01B0 DMG
 		Regs.BC = 0x0013;
 		Regs.DE = 0x00D8;
 		Regs.HL = 0x014D;
@@ -26,9 +26,6 @@ Cpu::Cpu(Mmu* __mmu, Ppu* __ppu) : mmu(__mmu), ppu(__ppu)
 		mmu->WriteByteDirect(0xFFFF, 0x00); //IE
 		UpdateTimers(0xABCC); //set DIV
 	}
-
-	//mmu->WriteByteDirect(0xFF44, 0x90); //stub LY to 0x90 (line 144, begin VBlank)
-	mmu->WriteByteDirect(0xFF00, 0xFF); //stub input, no buttons pressed
 
 }
 

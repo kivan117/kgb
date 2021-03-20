@@ -18,12 +18,66 @@ Mmu::Mmu()
 {
 	//initialize all the various io registers to their correct starting values
 
-	//stub input to 0xFF, meaning nothing pressed
-	ROM[0xFF00] = 0xFF;
+	Memory[0xFF00] = 0xFF; //stub initial input to all buttons released
+
+	//std::fill(Memory, Memory + 0x10000, 0xFF);
 }
 
 void Mmu::Tick(uint16_t cycles)
 {
+	if (doesRTCExist && ((rtcRegValues[DH] & 0x40) == 0)) //rtc exists and halt bit not set
+	{
+		rtc_clock += cycles;
+		while (rtc_clock > 128)
+		{
+			rtc_clock -= 128;
+			rtc_ticks++;
+
+			while (rtc_ticks >= 0x8000)
+			{
+				rtc_ticks -= 0x8000;
+				rtcRegValues[S] += 1;
+			}
+			if (rtcRegValues[S] == 0x3C)
+			{
+				rtcRegValues[S] = 0x00;
+
+				rtcRegValues[M] += 1;
+
+				if (rtcRegValues[M] == 0x3C)
+				{
+					rtcRegValues[M] = 0x00;
+
+					rtcRegValues[H] += 1;
+
+					if (rtcRegValues[H] == 0x18)
+					{
+						rtcRegValues[H] = 0x00;
+
+						if (rtcRegValues[DL] == 0xFF)
+						{
+							if (rtcRegValues[DH] & 0x01)
+							{
+								rtcRegValues[DH] |= 0x80; //set day counter overflow
+								rtcRegValues[DH] &= 0xFE; //clear day counter high bit
+							}
+							else
+								rtcRegValues[DH] |= 0x01;
+						}
+
+						rtcRegValues[DL] += 1;
+					}
+				}
+				
+			}
+			rtcRegValues[S] &= 0x3F;
+			rtcRegValues[M] &= 0x3F;
+			rtcRegValues[H] &= 0x1F;
+			rtcRegValues[DH] &= 0xC1;
+			
+		}
+	}
+
 	if (!DMAInProgress)
 		return;
 
@@ -75,6 +129,17 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 	}
 	if (addr > 0x9FFF && addr < 0xC000) //external cartridge ram (possibly banked)
 	{
+		if (doesRTCExist && isRTCEnabled && (mappedRTCReg < RTCREGS::NONE))
+		{
+			if (isRTCLatched)
+			{
+				return latchedRtcRegValues[mappedRTCReg];
+			}
+			else
+			{
+				return rtcRegValues[mappedRTCReg];
+			}
+		}
 		if (!isCartRamEnabled)
 			return 0xFF;
 		switch (currentMBC)
@@ -83,20 +148,26 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 		{
 			if (totalRamBanks > 1 && mbc1Mode == 1)
 				return CartRam[(uint32_t)((uint32_t)hiBank << 13) + (addr & 0x1FFF)];
-			return CartRam[(addr & 0x1FFF)];
+			else if(totalRamBanks)
+				return CartRam[(addr & 0x1FFF)];
+			return 0xFF;
 			break;
 		}
 		case(MBC3):
 		{
 			if (totalRamBanks > 1)
 				return CartRam[(uint32_t)((uint32_t)hiBank << 13) + (addr & 0x1FFF)];
-			return CartRam[(addr & 0x1FFF)];
+			else if (totalRamBanks)
+				return CartRam[(addr & 0x1FFF)];
+			return 0xFF;
 			break;
 		case(MBC5):
 		{
 			if (totalRamBanks > 1)
 				return CartRam[(uint32_t)((uint32_t)currentRamBank << 13) + (addr & 0x1FFF)];
-			return CartRam[(addr & 0x1FFF)];
+			else if (totalRamBanks)
+				return CartRam[(addr & 0x1FFF)];
+			return 0xFF;
 			break;
 		}
 		}
@@ -146,7 +217,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		case(MBC_TYPE::MBC5):
 			WriteMBC5(addr, val);
 			return;
-		case(MBC_TYPE::NONE):
+		case(MBC_TYPE::NOMBC):
 		case(MBC_TYPE::UNKNOWN):
 		default:
 			//std::cout << "Blocked write to 0x" << std::hex << std::setfill('0') << std::uppercase << std::setw(4) << addr << std::endl;
@@ -241,21 +312,46 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		{
 			if (totalRamBanks > 1 && mbc1Mode == 1)
 				CartRam[((uint16_t)(hiBank) << 13) + (addr & 0x1FFF)] = val;
-			else
+			else if(totalRamBanks)
 				CartRam[(addr & 0x1FFF)] = val;
 		}
-		if (currentMBC == MBC3 && isCartRamEnabled)
+		if (currentMBC == MBC3)
 		{
-			if (totalRamBanks > 1)
-				CartRam[((uint16_t)(hiBank) << 13) + (addr & 0x1FFF)] = val;
-			else
-				CartRam[(addr & 0x1FFF)] = val;
+			if (doesRTCExist && isRTCEnabled && (mappedRTCReg < RTCREGS::NONE))
+			{
+				switch (mappedRTCReg)
+				{
+				case(RTCREGS::S):
+					rtc_ticks = 0;
+				case(RTCREGS::M):
+					rtcRegValues[mappedRTCReg] = val & 0x3F;
+					break;
+				case(RTCREGS::H):
+					rtcRegValues[mappedRTCReg] = val & 0x1F;
+					break;
+				case(RTCREGS::DL):
+					rtcRegValues[mappedRTCReg] = val;
+					break;
+				case(RTCREGS::DH):
+					rtcRegValues[mappedRTCReg] = val & 0xC1;
+					break;
+				default:
+					break;
+				}
+			}
+			else if (isCartRamEnabled)
+			{
+				if (totalRamBanks > 1)
+					CartRam[((uint16_t)(hiBank) << 13) + (addr & 0x1FFF)] = val;
+				else if (totalRamBanks)
+					CartRam[(addr & 0x1FFF)] = val;
+			}
 		}
 		if (currentMBC == MBC5 && isCartRamEnabled)
 		{
 			if (totalRamBanks > 1)
 				CartRam[((uint16_t)(currentRamBank) << 13) + (addr & 0x1FFF)] = val;
-			else
+			else if (totalRamBanks)
 				CartRam[(addr & 0x1FFF)] = val;
 		}
 		return;
@@ -316,7 +412,7 @@ void Mmu::ParseRomHeader()
 	case(0x00):
 	case(0x08):
 	case(0x09):
-		currentMBC = MBC_TYPE::NONE;
+		currentMBC = MBC_TYPE::NOMBC;
 		break;
 	case(0x01):
 	case(0x02):
@@ -329,6 +425,7 @@ void Mmu::ParseRomHeader()
 		break;
 	case(0x0F):
 	case(0x10):
+		doesRTCExist = true;
 	case(0x11):
 	case(0x12):
 	case(0x13):
@@ -474,9 +571,15 @@ void Mmu::WriteMBC3(uint16_t addr, uint8_t val)
 	{
 		uint8_t enable = val & 0x0F;
 		if (enable == 0x0A)
+		{
 			isCartRamEnabled = true;
+			isRTCEnabled = true;
+		}
 		else
+		{
 			isCartRamEnabled = false;
+			isRTCEnabled = false;
+		}
 		return;
 	}
 	if (addr < 0x4000) //0x2000 to 0x3FFF rom bank number
@@ -490,20 +593,38 @@ void Mmu::WriteMBC3(uint16_t addr, uint8_t val)
 	}
 	if (addr < 0x6000) // RAM bank number / rtc register select
 	{
-		if (val < 4)
+		if (val >= 0x08 && val <= 0x0C)
+		{
+			mappedRTCReg = (RTCREGS)(val - 0x08);
+		}
+		else if (val < 4)
 		{
 			hiBank = val;
 			currentRamBank = hiBank;
+			mappedRTCReg = RTCREGS::NONE;
 		}
 
-		//TODO: rtc register select
 
 		return;
 	}
-	//if (addr < 0x8000) //latch clock data
-	//{
-	//	//TODO: latch clock data if writing 01 when current value is 00
-	//}
+	if (addr < 0x8000) //latch clock data
+	{
+		//TODO: latch clock data if writing 01 when current value is 00
+		if (val == 0x01 && rtcLatchRegs == 0x00)
+		{
+			isRTCLatched = !isRTCLatched;
+
+			if (isRTCLatched)
+			{
+				latchedRtcRegValues[S]  = rtcRegValues[S];
+				latchedRtcRegValues[M]  = rtcRegValues[M];
+				latchedRtcRegValues[H]  = rtcRegValues[H];
+				latchedRtcRegValues[DL] = rtcRegValues[DL];
+				latchedRtcRegValues[DH] = rtcRegValues[DH];
+			}
+		}
+		rtcLatchRegs = val; //val & 0x01;
+	}
 	return;
 }
 

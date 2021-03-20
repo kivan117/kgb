@@ -29,6 +29,8 @@ public:
 	//void SaveStat(uint8_t val);
 	//uint16_t master_clock{ 0x00 };
 	uint16_t master_clock{ 0xDC88 }; //TODO: set this to 0 once the bootrom PPU timing is correct
+	uint16_t rtc_clock = 0;
+	uint32_t rtc_ticks = 0;
 
 	uint8_t currentPPUMode{ 0 };
 
@@ -57,17 +59,28 @@ private:
 	uint8_t currentRamBank = 1;
 	uint8_t totalRamBanks  = 1;
 	bool isCartRamEnabled = false;
+	bool doesRTCExist = false;
+	bool isRTCEnabled = false;
+	uint8_t rtcLatchRegs = 0x00; //if switching from 00 to 01, latch/unlatch
+	bool isRTCLatched = false;
+	
+	enum RTCREGS {S = 0, M, H, DL, DH, NONE};
+
+	RTCREGS mappedRTCReg = RTCREGS::NONE;
+
+	uint8_t rtcRegValues[5] = { 0 };
+	uint8_t latchedRtcRegValues[5] = { 0 };
 
 	uint8_t DMGBootROM[0x100] = { 0 };
 
 	uint8_t ROM[0x800000] = { 0 }; //8 MB, the max CGB rom size. Probably excessive but it should always work.
 
-	uint8_t Memory[0x10000] = { 0xFF }; //the currently active mapped memory
+	uint8_t Memory[0x10000] = { 0 }; //the currently active mapped memory
 
 	std::vector<uint8_t> CartRam;
 
-	enum MBC_TYPE { NONE, MBC1, MBC2, MBC3, MBC5, UNKNOWN };
-	MBC_TYPE currentMBC = MBC_TYPE::NONE;
+	enum MBC_TYPE { NOMBC, MBC1, MBC2, MBC3, MBC5, UNKNOWN };
+	MBC_TYPE currentMBC = MBC_TYPE::NOMBC;
 
 	uint8_t lowBank = 0x01;
 	uint8_t hiBank = 0x00;
