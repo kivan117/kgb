@@ -1,5 +1,8 @@
 #include "Mmu.h"
 #include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <chrono>
 
 //0000 	3FFF 	16 KiB ROM bank 00 	From cartridge, usually a fixed bank
 //4000 	7FFF 	16 KiB ROM Bank 01~NN 	From cartridge, switchable bank via mapper(if any)
@@ -25,6 +28,7 @@ Mmu::Mmu()
 
 void Mmu::Tick(uint16_t cycles)
 {
+	//todo: make rtc code not suck
 	if (doesRTCExist && ((rtcRegValues[DH] & 0x40) == 0)) //rtc exists and halt bit not set
 	{
 		rtc_clock += cycles;
@@ -147,26 +151,26 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 		case(MBC1):
 		{
 			if (totalRamBanks > 1 && mbc1Mode == 1)
-				return CartRam[(uint32_t)((uint32_t)hiBank << 13) + (addr & 0x1FFF)];
-			else if(totalRamBanks)
-				return CartRam[(addr & 0x1FFF)];
+				return ReadCartRam((uint32_t)((uint32_t)hiBank << 13) + (addr & 0x1FFF));
+			else if (totalRamBanks)
+				return ReadCartRam((addr & 0x1FFF));
 			return 0xFF;
 			break;
 		}
 		case(MBC3):
 		{
 			if (totalRamBanks > 1)
-				return CartRam[(uint32_t)((uint32_t)hiBank << 13) + (addr & 0x1FFF)];
+				return ReadCartRam((uint32_t)((uint32_t)hiBank << 13) + (addr & 0x1FFF));
 			else if (totalRamBanks)
-				return CartRam[(addr & 0x1FFF)];
+				return ReadCartRam((addr & 0x1FFF));
 			return 0xFF;
 			break;
 		case(MBC5):
 		{
 			if (totalRamBanks > 1)
-				return CartRam[(uint32_t)((uint32_t)currentRamBank << 13) + (addr & 0x1FFF)];
+				return ReadCartRam((uint32_t)((uint32_t)currentRamBank << 13) + (addr & 0x1FFF));
 			else if (totalRamBanks)
-				return CartRam[(addr & 0x1FFF)];
+				return ReadCartRam((addr & 0x1FFF));
 			return 0xFF;
 			break;
 		}
@@ -311,9 +315,9 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		if (currentMBC == MBC1 && isCartRamEnabled)
 		{
 			if (totalRamBanks > 1 && mbc1Mode == 1)
-				CartRam[((uint16_t)(hiBank) << 13) + (addr & 0x1FFF)] = val;
-			else if(totalRamBanks)
-				CartRam[(addr & 0x1FFF)] = val;
+				WriteCartRam(((uint16_t)(hiBank) << 13) + (addr & 0x1FFF), val);
+			else if (totalRamBanks)
+				WriteCartRam((addr & 0x1FFF), val);
 		}
 		if (currentMBC == MBC3)
 		{
@@ -342,17 +346,17 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 			else if (isCartRamEnabled)
 			{
 				if (totalRamBanks > 1)
-					CartRam[((uint16_t)(hiBank) << 13) + (addr & 0x1FFF)] = val;
+					WriteCartRam(((uint16_t)(hiBank) << 13) + (addr & 0x1FFF), val);
 				else if (totalRamBanks)
-					CartRam[(addr & 0x1FFF)] = val;
+					WriteCartRam((addr & 0x1FFF), val);
 			}
 		}
 		if (currentMBC == MBC5 && isCartRamEnabled)
 		{
 			if (totalRamBanks > 1)
-				CartRam[((uint16_t)(currentRamBank) << 13) + (addr & 0x1FFF)] = val;
+				WriteCartRam(((uint16_t)(currentRamBank) << 13) + (addr & 0x1FFF), val);
 			else if (totalRamBanks)
-				CartRam[(addr & 0x1FFF)] = val;
+				WriteCartRam((addr & 0x1FFF), val);
 		}
 		return;
 	}
@@ -401,7 +405,7 @@ void Mmu::WriteByteDirect(uint16_t addr, uint8_t val)
 	Memory[addr] = val;
 }
 
-void Mmu::ParseRomHeader()
+void Mmu::ParseRomHeader(const std::string& romFileName)
 {
 	uint8_t cart_type = ROM[0x0147];
 	uint8_t rom_size  = ROM[0x0148];
@@ -414,29 +418,33 @@ void Mmu::ParseRomHeader()
 	case(0x09):
 		currentMBC = MBC_TYPE::NOMBC;
 		break;
+	case(0x03):
+		hasSaveBattery = true;
 	case(0x01):
 	case(0x02):
-	case(0x03):
 		currentMBC = MBC_TYPE::MBC1;
 		break;
-	case(0x05):
 	case(0x06):
+		hasSaveBattery = true;
+	case(0x05):
 		currentMBC = MBC_TYPE::MBC2;
 		break;
-	case(0x0F):
 	case(0x10):
+	case(0x0F):
 		doesRTCExist = true;
+	case(0x13):
+		hasSaveBattery = true;
 	case(0x11):
 	case(0x12):
-	case(0x13):
 		currentMBC = MBC_TYPE::MBC3;
 		break;
+	case(0x1B):
+	case(0x1E):
+		hasSaveBattery = true;
 	case(0x19):
 	case(0x1A):
-	case(0x1B):
 	case(0x1C):
 	case(0x1D):
-	case(0x1E):
 		currentMBC = MBC_TYPE::MBC5;
 		break;
 	default:
@@ -499,11 +507,227 @@ void Mmu::ParseRomHeader()
 
 	if (totalRamBanks)
 	{
-		if (CartRam.size())
-			CartRam.clear();
-		CartRam.resize(1024 * 8 * totalRamBanks);
+		if (hasSaveBattery)
+		{
+			LoadSave(romFileName);
+		}
+		else
+		{
+			if (CartRam.size() > 0)
+				CartRam.clear();
+			CartRam.resize(0x2000 * totalRamBanks);
+		}
 	}
 
+	return;
+}
+
+void Mmu::LoadSave(const std::string& romFileName)
+{
+	if (!hasSaveBattery)
+		return;
+
+	uint32_t savesize = 0x2000 * totalRamBanks;
+
+	if (doesRTCExist)
+		savesize += 48;
+
+	saveFileName = NewFileExtension(romFileName, "sav");
+
+	if (FileExists(saveFileName))
+	{
+		if (FileSize(saveFileName) != savesize)
+		{
+			//TODO: fill save data with FF instead of 00
+			ResizeFile(saveFileName, savesize);
+		}
+
+		CartRam.clear();
+		CartRam.reserve(savesize);
+
+		std::ifstream inFile;
+		inFile.open(saveFileName, std::ios::in | std::ios::binary);
+		inFile.unsetf(std::ios::skipws);
+		inFile.seekg(0, std::ios::end);
+		int fileSize = inFile.tellg();
+		inFile.seekg(0, std::ios::beg);
+		if (!inFile.good())
+		{
+			std::cout << "Error opening save file: " << saveFileName << std::endl;
+			return;
+		}
+		if (fileSize != savesize)
+		{
+			std::cout << "Save File size error. Expected: " << (int)savesize << " Actual: " << (int)fileSize << std::endl;
+		}
+
+		std::copy(std::istream_iterator<unsigned char>(inFile), std::istream_iterator<unsigned char>(), std::back_inserter(CartRam));
+
+		if (doesRTCExist)
+		{
+
+			rtcRegValues[0] = CartRam[CartRam.size() - 48];
+			rtcRegValues[1] = CartRam[CartRam.size() - 44];
+			rtcRegValues[2] = CartRam[CartRam.size() - 40];
+			rtcRegValues[3] = CartRam[CartRam.size() - 36];
+			rtcRegValues[4] = CartRam[CartRam.size() - 32];
+
+			latchedRtcRegValues[0] = CartRam[CartRam.size() - 28];
+			latchedRtcRegValues[1] = CartRam[CartRam.size() - 24];
+			latchedRtcRegValues[2] = CartRam[CartRam.size() - 20];
+			latchedRtcRegValues[3] = CartRam[CartRam.size() - 16];
+			latchedRtcRegValues[4] = CartRam[CartRam.size() - 12];
+
+			uint64_t old_timestamp;
+			std::memcpy(&old_timestamp, &CartRam[CartRam.size() - sizeof(old_timestamp)], sizeof(old_timestamp));
+
+			auto tp = std::chrono::system_clock::now();
+			auto dur = tp.time_since_epoch();
+			auto seconds = std::chrono::duration_cast<std::chrono::seconds>(dur).count();
+			uint64_t current_timestamp = (uint64_t)seconds;
+
+			//todo: this rtc code is a dumpster fire. fix this nonsense
+
+			if (old_timestamp < current_timestamp)
+			{
+				uintmax_t seconds_to_add = current_timestamp - old_timestamp;
+				
+				if (seconds_to_add)
+				{
+					while(seconds_to_add >= 86400) //add days
+					{
+						if (rtcRegValues[DL] == 0xFF) //days overflow
+							rtcRegValues[DH] |= 1;
+						rtcRegValues[DL] += 1;
+						seconds_to_add -= 86400;
+					}
+					while (seconds_to_add >= 3600) //add hours
+					{
+						if (rtcRegValues[H] == 23) //hours overflow
+						{
+							if (rtcRegValues[DL] == 0xFF) //days overflow
+								rtcRegValues[DH] |= 1;
+							rtcRegValues[DL] += 1;
+						}
+						rtcRegValues[H] += 1;
+						seconds_to_add -= 3600;
+					}
+					while (seconds_to_add >= 60)
+					{
+						if (rtcRegValues[M] == 59)
+						{
+							if (rtcRegValues[H] == 23) //hours overflow
+							{
+								if (rtcRegValues[DL] == 0xFF) //days overflow
+									rtcRegValues[DH] |= 1;
+								rtcRegValues[DL] += 1;
+							}
+							rtcRegValues[H] += 1;
+						}
+						rtcRegValues[M] += 1;
+						seconds_to_add -= 60;
+					}
+					
+					if (rtcRegValues[S] + seconds_to_add > 60)
+					{
+						if (rtcRegValues[M] == 59) //minutes overflow
+						{
+							if (rtcRegValues[H] == 23) //hours overflow
+							{
+								if (rtcRegValues[DL] == 0xFF) //days overflow
+									rtcRegValues[DH] |= 1;
+								rtcRegValues[DL] += 1;
+							}
+							rtcRegValues[H] += 1;
+						}
+						rtcRegValues[M] += 1;
+					}
+
+					rtcRegValues[S] = (rtcRegValues[S] + seconds_to_add) % 60;
+				}
+			}
+
+			CartRam.resize(savesize - 48);
+		}
+		
+
+		inFile.close();
+	}
+	else
+	{
+		if (doesRTCExist)
+			CartRam.resize(savesize - 48, 0xFF);
+		else
+			CartRam.resize(savesize, 0xFF);
+		//std::fill(CartRam.begin(), CartRam.end(), 0xFF);
+		std::ofstream saveFstream;
+		saveFstream.open(saveFileName, std::ios::out | std::ios::binary | std::ios::beg);
+		saveFstream.write((char*)&CartRam[0], CartRam.size() * sizeof(uint8_t));
+		saveFstream.close();
+		ResizeFile(saveFileName, savesize);
+	}
+
+	return;
+}
+
+void Mmu::SaveGame(const std::string& romFileName)
+{
+	if (!hasSaveBattery)
+		return;
+
+	uint32_t savesize = 0x2000 * totalRamBanks;
+
+	saveFileName = NewFileExtension(romFileName, "sav");
+
+	std::ofstream saveFstream;
+	saveFstream.open(saveFileName, std::ios::out | std::ios::binary | std::ios::beg);
+	saveFstream.write((char*)&CartRam[0], CartRam.size() * sizeof(uint8_t));
+	
+	
+	if (doesRTCExist)
+	{
+		
+		//TODO: actually write RTC to end in 48 byte format
+		for (int i = 0; i < 5; i++)
+		{
+			uint32_t tempVal = rtcRegValues[i];
+			saveFstream.write((char*)&tempVal, sizeof(uint32_t));
+		}
+		for (int i = 0; i < 5; i++)
+		{
+			uint32_t tempVal = latchedRtcRegValues[i];
+			saveFstream.write((char*)&tempVal, sizeof(uint32_t));
+		}
+		auto tp = std::chrono::system_clock::now();
+		auto dur = tp.time_since_epoch();
+		auto seconds = std::chrono::duration_cast<std::chrono::seconds>(dur).count();
+		uint64_t timestamp = (uint64_t)seconds;
+		saveFstream.write((char*)&timestamp, sizeof(uint64_t));
+		saveFstream.close();
+		savesize += 48;
+		ResizeFile(saveFileName, savesize);
+	}		
+
+	return;
+}
+
+uint8_t Mmu::ReadCartRam(uint16_t addr)
+{
+	if (CartRam.size() >= addr + 1)
+		return CartRam[addr];
+
+	std::cout << "Error reading from Cart Ram: " << std::hex << std::setfill('0') << std::uppercase << std::setw(4) << (int)addr << std::endl;
+	return 0xFF;
+}
+void Mmu::WriteCartRam(uint16_t addr, uint8_t val)
+{
+	if (CartRam.size() >= addr + 1)
+	{
+		CartRam[addr] = val;
+		return;
+	}
+
+	std::cout << "Error writing to Cart Ram: " << std::hex << std::setfill('0') << std::uppercase << std::setw(4) << (int)addr << std::endl;
 	return;
 }
 

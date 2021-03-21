@@ -340,7 +340,6 @@ void Ppu::RenderLine()
 
 		for (int pixelX = 8; pixelX < 168; pixelX++)
 		{
-			bool pixelDrawn = false;
 			uint8_t minX = 0; //lowest x value that can be drawn over
 
 			for (int i = 0; i < lineSpriteCount; i++)
@@ -349,41 +348,25 @@ void Ppu::RenderLine()
 					continue;
 
 				uint8_t tileY = lineSprites[i].yflip ? ((spriteHeight - 1) - (currentLine - (lineSprites[i].y - 16))) & (spriteHeight - 1) : (currentLine - (lineSprites[i].y - 16)) & (spriteHeight - 1);
-
 				uint8_t tileDataL = mmu->ReadByteDirect(0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2));
 				uint8_t tileDataH = mmu->ReadByteDirect(0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2) + 1);
-
 				int16_t coordX = lineSprites[i].x - 8;
-
-				//for (int subX = 0; subX < 8; subX++)
-				//{
-					//if (coordX + subX < minX)
-					//	continue;
-
 				int subX = (pixelX - 8) - coordX;
-
 				uint8_t tileX = lineSprites[i].xflip ? 7 - subX : subX;
 				uint8_t color = (((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01));
 				if (lineSprites[i].bg_priority && (WorkingFrameBuffer[currentLine * 160 + coordX + subX] != 0)) //don't draw over background, but do move minX
 				{
-					pixelDrawn = true;
+					break;
 				}
 				else if (color != 0x00) //transparent
 				{
-					pixelDrawn = true;
 					if (lineSprites[i].palette)
 						WorkingFrameBuffer[currentLine * 160 + coordX + subX] = obp_one[color];
 					else
 						WorkingFrameBuffer[currentLine * 160 + coordX + subX] = obp_zero[color];
-				}
-				 
 
-				if (pixelDrawn)
-				{
 					break;
 				}
-
-				//}
 			}
 
 		}

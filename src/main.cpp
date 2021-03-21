@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <cassert>
+#include <algorithm>
 #include <SDL2/SDL.h>
 #include "Mmu.h"
 #include "Cpu.h"
@@ -38,10 +39,14 @@ int main(int argc, char* argv[])
 
 	std::ifstream inFile;
 	inFile.open(argv[1], std::ios::in | std::ios::binary);
+	inFile.unsetf(std::ios::skipws);
 	inFile.seekg(0, std::ios::end);
-	std::streampos fileSize = inFile.tellg();
+	int fileSize = inFile.tellg();
 	inFile.seekg(0, std::ios::beg);
-	if (!inFile.read((char*)mmu->GetROM(), std::min((int)fileSize, 0x800000)))
+
+	fileSize = fileSize < 0x800000 ? fileSize : 0x800000;
+
+	if (!inFile.read((char*)mmu->GetROM(), fileSize))
 	{
 		std::cerr << "Error reading file." << std::endl;
 		exit(-1);
@@ -49,17 +54,25 @@ int main(int argc, char* argv[])
 	inFile.close();
 
 	inFile.open(argv[2], std::ios::in | std::ios::binary);
+	inFile.unsetf(std::ios::skipws);
 	inFile.seekg(0, std::ios::end);
 	fileSize = inFile.tellg();
 	inFile.seekg(0, std::ios::beg);
-	if (!inFile.read((char*)mmu->GetDMGBootRom(), std::min((int)fileSize, 0x100)))
+
+	fileSize = fileSize < 0x100 ? fileSize : 0x100;
+
+	if (!inFile.read((char*)mmu->GetDMGBootRom(), fileSize))
 	{
 		std::cerr << "Error reading file." << std::endl;
 		exit(-1);
 	}
 	inFile.close();
 
-	mmu->ParseRomHeader();
+	
+
+	std::string romFileName = argv[1];
+
+	mmu->ParseRomHeader(romFileName);
 
 	const uint32_t palette_gbp_gray[4] = { 0xFFCDDBE0, 0xFF949FA8, 0xFF666B70, 0xFF262B2B };
 	const uint32_t palette_gbp_green[4] = { 0xFFB4F4DB, 0xFF96C3AB, 0xFF78927B, 0xFF5A624C };
@@ -83,10 +96,12 @@ int main(int argc, char* argv[])
 	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
 	SDL_SetHint(SDL_HINT_RENDER_BATCHING, "1");
 	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
+	//SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
 
 	SDL_Window* window = SDL_CreateWindow("kgb", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 576, SDL_WINDOW_OPENGL);
 
 	SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+	//SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
 	SDL_SetRenderDrawColor(renderer, palette[0] & 0x000000FF, (palette[0] & 0x0000FF00) >> 8, (palette[0] & 0x00FF0000) >> 16, 0xFF);
 	SDL_RenderClear(renderer);
@@ -96,6 +111,7 @@ int main(int argc, char* argv[])
 	//SDL_RendererInfo renderinfo;
 	//SDL_GetRendererInfo(renderer, &renderinfo);
 	SDL_GL_SetSwapInterval(1);
+	//SDL_GL_SetSwapInterval(0);
 	SDL_Event e;
 
 	bool userQuit = false;
@@ -285,6 +301,8 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
+
+	mmu->SaveGame(romFileName);
 
 	return 0;
 }

@@ -1,11 +1,14 @@
 #pragma once
 #include <stdint.h>
 #include <vector>
+#include <iostream>
+#include "FileOps.h"
 
 class Mmu
 {
 public:
 	Mmu();
+	~Mmu();
 	uint8_t		ReadByte(uint16_t addr);
 	void		WriteByte(uint16_t addr, uint8_t val);
 	uint16_t	ReadWord(uint16_t addr);
@@ -23,7 +26,11 @@ public:
 
 	uint8_t	ReadByteDirect(uint16_t addr);
 
-	void ParseRomHeader();
+	void ParseRomHeader(const std::string& romFileName);
+
+	void LoadSave(const std::string& romFileName);
+
+	void SaveGame(const std::string& romFileName);
 
 	//void SaveDiv(uint8_t val);
 	//void SaveStat(uint8_t val);
@@ -77,7 +84,14 @@ private:
 
 	uint8_t Memory[0x10000] = { 0 }; //the currently active mapped memory
 
+	bool hasSaveBattery = false;
+
 	std::vector<uint8_t> CartRam;
+
+	std::string saveFileName;
+
+	uint8_t ReadCartRam(uint16_t addr);
+	void WriteCartRam(uint16_t addr, uint8_t val);
 
 	enum MBC_TYPE { NOMBC, MBC1, MBC2, MBC3, MBC5, UNKNOWN };
 	MBC_TYPE currentMBC = MBC_TYPE::NOMBC;
@@ -90,9 +104,5 @@ private:
 	void WriteMBC2(uint16_t addr, uint8_t val);
 	void WriteMBC3(uint16_t addr, uint8_t val);
 	void WriteMBC5(uint16_t addr, uint8_t val);
-
-	/*uint8_t	ReadByte(uint16_t addr, bool allowDMAConflict);*/
-
-	/*uint8_t	ReadByteDirect(uint16_t addr);*/
 };
 
