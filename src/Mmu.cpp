@@ -157,6 +157,11 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 			return 0xFF;
 			break;
 		}
+		case(MBC2):
+		{
+			return ReadCartRam((addr & 0x01FF));
+			break;
+		}
 		case(MBC3):
 		{
 			if (totalRamBanks > 1)
@@ -318,6 +323,10 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 				WriteCartRam(((uint16_t)(hiBank) << 13) + (addr & 0x1FFF), val);
 			else if (totalRamBanks)
 				WriteCartRam((addr & 0x1FFF), val);
+		}
+		if (currentMBC == MBC2 && isCartRamEnabled)
+		{
+			WriteCartRam((addr & 0x01FF), ((val & 0x0F) | 0xF0));
 		}
 		if (currentMBC == MBC3)
 		{
@@ -501,7 +510,10 @@ void Mmu::ParseRomHeader(const std::string& romFileName)
 	case(0x00):
 	case(0x01):
 	default:
-		totalRamBanks = 0;
+		if (currentMBC == MBC2)
+			totalRamBanks = 1;
+		else
+			totalRamBanks = 0;
 		break;
 	}
 
@@ -786,6 +798,22 @@ void Mmu::WriteMBC1(uint16_t addr, uint8_t val)
 
 void Mmu::WriteMBC2(uint16_t addr, uint8_t val)
 {
+	if (addr < 0x4000)
+	{
+		if (addr & 0x0100) //change rom bank number
+		{
+			currentRomBank = val & 0x0F;
+			if (currentRomBank == 0)
+				currentRomBank = 1;
+		}
+		else //enable/disable RAM
+		{
+			if ((val & 0x0F) == 0x0A)
+				isCartRamEnabled = true;
+			else
+				isCartRamEnabled = false;
+		}
+	}
 	return;
 }
 
