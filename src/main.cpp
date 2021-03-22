@@ -87,10 +87,39 @@ int main(int argc, char* argv[])
 
 	memcpy(palette, palette_gbp_gray, sizeof(uint32_t) * 4);
 
+	bool enabledGamepad = true;
+	SDL_GameController* controller = NULL;
+	
+
 	if (SDL_Init(SDL_INIT_VIDEO) < 0)
 	{
 		std::cout << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
 		return -1;
+	}
+	if (SDL_Init(SDL_INIT_GAMECONTROLLER) < 0)
+	{
+		std::cout << "SDL could not initialize gamepad subsystem. SDL_Error: " << SDL_GetError() << std::endl;
+		enabledGamepad = false;
+	}
+
+	if (enabledGamepad)
+	{
+		for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+			if (SDL_IsGameController(i)) {
+				controller = SDL_GameControllerOpen(i);
+				if (controller) {
+					break;
+				}
+				else {
+					std::cout << "Could not open gamecontroller " << i << ". " << SDL_GetError() << std::endl;
+				}
+			}
+		}
+	}
+
+	if (controller)
+	{
+		SDL_GameControllerAddMappingsFromFile("gamecontrollerdb.txt");
 	}
 
 	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
@@ -139,7 +168,10 @@ int main(int argc, char* argv[])
 			{
 				for (int x = 0; x < 160; x++)
 				{
+					//if DMG use palette
 					screen[y * 160 + x] = palette[fb[y * 160 + x]];
+					//if CGB use ppu separate colorized buffer directly
+
 				}
 			}
 
@@ -179,56 +211,114 @@ int main(int argc, char* argv[])
 					userQuit = true;
 					break;
 				}
-				case(SDL_KEYUP):
+				case(SDL_KEYDOWN):
 				{
 					switch (e.key.keysym.scancode)
 					{
 					case SDL_SCANCODE_W:
 					case SDL_SCANCODE_UP:
 						//press up;
-						mmu->Joypad.directions |= mmu->Joypad.up;
+						mmu->Joypad.directions &= ~(mmu->Joypad.up);
 						break;
 
 					case SDL_SCANCODE_S:
 					case SDL_SCANCODE_DOWN:
 						//press down
-						mmu->Joypad.directions |= mmu->Joypad.down;
+						mmu->Joypad.directions &= ~(mmu->Joypad.down);
 						break;
 
 					case SDL_SCANCODE_A:
 					case SDL_SCANCODE_LEFT:
 						//press left
-						mmu->Joypad.directions |= mmu->Joypad.left;
+						mmu->Joypad.directions &= ~(mmu->Joypad.left);
 						break;
 
 					case SDL_SCANCODE_D:
 					case SDL_SCANCODE_RIGHT:
 						//press right
-						mmu->Joypad.directions |= mmu->Joypad.right;
+						mmu->Joypad.directions &= ~(mmu->Joypad.right);
 						break;
 
 					case SDL_SCANCODE_Z:
 					case SDL_SCANCODE_N:
 						//press B
-						mmu->Joypad.buttons |= mmu->Joypad.b_button;
+						mmu->Joypad.buttons &= ~(mmu->Joypad.b_button);
 						break;
 
 					case SDL_SCANCODE_X:
 					case SDL_SCANCODE_M:
 						//press A
-						mmu->Joypad.buttons |= mmu->Joypad.a_button;
+						mmu->Joypad.buttons &= ~(mmu->Joypad.a_button);
 						break;
 
 					case SDL_SCANCODE_RSHIFT:
 					case SDL_SCANCODE_LSHIFT:
 						//press select
-						mmu->Joypad.buttons |= mmu->Joypad.select_button;
+						mmu->Joypad.buttons &= ~(mmu->Joypad.select_button);
 						break;
 
 					case SDL_SCANCODE_RETURN:
 					case SDL_SCANCODE_LCTRL:
 					case SDL_SCANCODE_RCTRL:
 						//press start
+						mmu->Joypad.buttons &= ~(mmu->Joypad.start_button);
+						break;
+
+					default:
+						break;
+					}
+					break;
+				}
+				case(SDL_KEYUP):
+				{
+					switch (e.key.keysym.scancode)
+					{
+					case SDL_SCANCODE_W:
+					case SDL_SCANCODE_UP:
+						//release up;
+						mmu->Joypad.directions |= mmu->Joypad.up;
+						break;
+
+					case SDL_SCANCODE_S:
+					case SDL_SCANCODE_DOWN:
+						//release down
+						mmu->Joypad.directions |= mmu->Joypad.down;
+						break;
+
+					case SDL_SCANCODE_A:
+					case SDL_SCANCODE_LEFT:
+						//release left
+						mmu->Joypad.directions |= mmu->Joypad.left;
+						break;
+
+					case SDL_SCANCODE_D:
+					case SDL_SCANCODE_RIGHT:
+						//release right
+						mmu->Joypad.directions |= mmu->Joypad.right;
+						break;
+
+					case SDL_SCANCODE_Z:
+					case SDL_SCANCODE_N:
+						//release B
+						mmu->Joypad.buttons |= mmu->Joypad.b_button;
+						break;
+
+					case SDL_SCANCODE_X:
+					case SDL_SCANCODE_M:
+						//release A
+						mmu->Joypad.buttons |= mmu->Joypad.a_button;
+						break;
+
+					case SDL_SCANCODE_RSHIFT:
+					case SDL_SCANCODE_LSHIFT:
+						//release select
+						mmu->Joypad.buttons |= mmu->Joypad.select_button;
+						break;
+
+					case SDL_SCANCODE_RETURN:
+					case SDL_SCANCODE_LCTRL:
+					case SDL_SCANCODE_RCTRL:
+						//release start
 						mmu->Joypad.buttons |= mmu->Joypad.start_button;
 						break;
 
@@ -237,61 +327,206 @@ int main(int argc, char* argv[])
 					}
 					break;
 				}
-				case(SDL_KEYDOWN):
+				case(SDL_CONTROLLERBUTTONDOWN):
 				{
-					switch (e.key.keysym.scancode)
+					switch (e.cbutton.button)
 					{
-					case SDL_SCANCODE_W:
-					case SDL_SCANCODE_UP:
-						//release up;
-						mmu->Joypad.directions &= ~(mmu->Joypad.up);
-						break;
-
-					case SDL_SCANCODE_S:
-					case SDL_SCANCODE_DOWN:
-						//release down
-						mmu->Joypad.directions &= ~(mmu->Joypad.down);
-						break;
-
-					case SDL_SCANCODE_A:
-					case SDL_SCANCODE_LEFT:
-						//release left
-						mmu->Joypad.directions &= ~(mmu->Joypad.left);
-						break;
-
-					case SDL_SCANCODE_D:
-					case SDL_SCANCODE_RIGHT:
-						//release right
-						mmu->Joypad.directions &= ~(mmu->Joypad.right);
-						break;
-
-					case SDL_SCANCODE_Z:
-					case SDL_SCANCODE_N:
-						//release B
+					case(SDL_CONTROLLER_BUTTON_A):
+					{
+						//press B
 						mmu->Joypad.buttons &= ~(mmu->Joypad.b_button);
 						break;
-
-					case SDL_SCANCODE_X:
-					case SDL_SCANCODE_M:
-						//release A
+					}
+					case(SDL_CONTROLLER_BUTTON_B):
+					{
+						//press A
 						mmu->Joypad.buttons &= ~(mmu->Joypad.a_button);
 						break;
-
-					case SDL_SCANCODE_RSHIFT:
-					case SDL_SCANCODE_LSHIFT:
-						//release select
-						mmu->Joypad.buttons &= ~(mmu->Joypad.select_button);
-						break;
-
-					case SDL_SCANCODE_RETURN:
-					case SDL_SCANCODE_LCTRL:
-					case SDL_SCANCODE_RCTRL:
-						//release start
+					}
+					case(SDL_CONTROLLER_BUTTON_START):
+					{
+						//press start
 						mmu->Joypad.buttons &= ~(mmu->Joypad.start_button);
 						break;
-
+					}
+					case(SDL_CONTROLLER_BUTTON_BACK):
+					{
+						//press select
+						mmu->Joypad.buttons &= ~(mmu->Joypad.select_button);
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_DPAD_UP):
+					{
+						//press up;
+						mmu->Joypad.directions &= ~(mmu->Joypad.up);
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_DPAD_DOWN):
+					{
+						//press down
+						mmu->Joypad.directions &= ~(mmu->Joypad.down);
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_DPAD_LEFT):
+					{
+						//press left
+						mmu->Joypad.directions &= ~(mmu->Joypad.left);
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_DPAD_RIGHT):
+					{
+						//press right
+						mmu->Joypad.directions &= ~(mmu->Joypad.right);
+						break;
+					}
 					default:
 						break;
+					}
+					break;
+				}
+				case(SDL_CONTROLLERBUTTONUP):
+				{
+					switch (e.cbutton.button)
+					{
+					case(SDL_CONTROLLER_BUTTON_A):
+					{
+						//release B
+						mmu->Joypad.buttons |= mmu->Joypad.b_button;
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_B):
+					{
+						//release A
+						mmu->Joypad.buttons |= mmu->Joypad.a_button;
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_START):
+					{
+						//release start
+						mmu->Joypad.buttons |= mmu->Joypad.start_button;
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_BACK):
+					{
+						//release select
+						mmu->Joypad.buttons |= mmu->Joypad.select_button;
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_DPAD_UP):
+					{
+						//release up;
+						mmu->Joypad.directions |= mmu->Joypad.up;
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_DPAD_DOWN):
+					{
+						//release down
+						mmu->Joypad.directions |= mmu->Joypad.down;
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_DPAD_LEFT):
+					{
+						//release left
+						mmu->Joypad.directions |= mmu->Joypad.left;
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_DPAD_RIGHT):
+					{
+						//release right
+						mmu->Joypad.directions |= mmu->Joypad.right;
+						break;
+					}
+					default:
+						break;
+					}
+					break;
+				}
+				case(SDL_CONTROLLERAXISMOTION):
+				{
+					switch (e.caxis.axis)
+					{
+					case(SDL_CONTROLLER_AXIS_LEFTX):
+					{
+						if (e.caxis.value < -8000)
+						{
+							//press left
+							mmu->Joypad.directions &= ~(mmu->Joypad.left);
+							//release right
+							mmu->Joypad.directions |= mmu->Joypad.right;
+						}
+						else if (e.caxis.value > 8000)
+						{
+							//press right
+							mmu->Joypad.directions &= ~(mmu->Joypad.right);
+							//release left
+							mmu->Joypad.directions |= mmu->Joypad.left;
+						}
+						else
+						{
+							//release right
+							mmu->Joypad.directions |= mmu->Joypad.right;
+							//release left
+							mmu->Joypad.directions |= mmu->Joypad.left;
+						}
+						break;
+					}
+					case(SDL_CONTROLLER_AXIS_LEFTY):
+					{
+						if (e.caxis.value < -8000)
+						{
+							//press up
+							mmu->Joypad.directions &= ~(mmu->Joypad.up);
+							//release down
+							mmu->Joypad.directions |= mmu->Joypad.down;
+						}
+						else if (e.caxis.value > 8000)
+						{
+							//press down
+							mmu->Joypad.directions &= ~(mmu->Joypad.down);
+							//release up
+							mmu->Joypad.directions |= mmu->Joypad.up;
+						}
+						else
+						{
+							//release up
+							mmu->Joypad.directions |= mmu->Joypad.up;
+							//release down
+							mmu->Joypad.directions |= mmu->Joypad.down;
+						}
+						break;
+					}
+					default:
+						break;
+					}
+					break;
+				}
+				case(SDL_CONTROLLERDEVICEREMOVED):
+				{
+					for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+						if (SDL_IsGameController(i)) {
+							controller = SDL_GameControllerOpen(i);
+							if (controller) {
+								break;
+							}
+							else {
+								std::cout << "Could not open gamecontroller " << i << ". " << SDL_GetError() << std::endl;
+							}
+						}
+					}
+					break;
+				}
+				case(SDL_CONTROLLERDEVICEADDED):
+				{
+					for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+						if (SDL_IsGameController(i)) {
+							controller = SDL_GameControllerOpen(i);
+							if (controller) {
+								break;
+							}
+							else {
+								std::cout << "Could not open gamecontroller " << i << ". " << SDL_GetError() << std::endl;
+							}
+						}
 					}
 					break;
 				}
