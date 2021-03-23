@@ -115,8 +115,10 @@ uint8_t Mmu::ReadByte(uint16_t addr)
 
 uint8_t Mmu::ReadByteDirect(uint16_t addr)
 {
-	if (addr < 0x100 && bootRomEnabled) //Boot Rom
+	if (addr < 0x100 && bootRomEnabled && (!cgbMode)) //DMG Boot Rom
 		return DMGBootROM[addr];
+	if (((addr < 0x100) || addr > 0x1FF && addr < 0x900 ) && bootRomEnabled && (cgbMode)) //CGB Boot Rom
+		return CGBBootROM[addr];
 	if (addr < 0x4000) //ROM, Bank 0
 	{
 		if (currentMBC == MBC1 && mbc1Mode == 0x01 && totalRomBanks > 0x20)
@@ -130,6 +132,10 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 	if (addr < 0x8000) //ROM, bank N
 	{
 		return ROM[(0x4000 * (currentRomBank % totalRomBanks)) + (addr - 0x4000)];
+	}
+	if (addr < 0xA000) //VRAM
+	{
+		return VRAM[currentVRAMBank][addr & 0x1FFF];
 	}
 	if (addr > 0x9FFF && addr < 0xC000) //external cartridge ram (possibly banked)
 	{
@@ -184,6 +190,14 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 			break;
 		}
 	}
+	if (addr > 0xBFFF && addr < 0xD000) //WRAM bank 0
+	{
+		return WRAM[0][addr & 0x0FFF];
+	}
+	if (addr > 0xCFFF && addr < 0xE000) //WRAM high bank (cgb mode), WRAM bank 1 in DMG mode
+	{
+		return WRAM[currentWRAMBank][addr & 0x0FFF];
+	}
 	if (addr > 0xDFFF && addr < 0xFE00) //echo ram
 		return Memory[addr - 0x2000];
 	if (addr > 0xFE9F && addr < 0xFF00) // prohibited area. todo: during OAM, return FF and trigger sprite bug. else return 00
@@ -203,6 +217,16 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 		}
 
 		return value;
+	}
+
+	if (addr == 0xFF69) //read CGB BGPD
+	{
+		return cgb_BGP[Memory[0xFF68] & 0x3F];
+	}
+
+	if (addr == 0xFF6B) //read CGB OBPD
+	{
+		return cgb_OBP[Memory[0xFF6A] & 0x3F];
 	}
 
 	return Memory[addr]; //just return the mapped memory
@@ -232,6 +256,23 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 			//std::cout << "Blocked write to 0x" << std::hex << std::setfill('0') << std::uppercase << std::setw(4) << addr << std::endl;
 			return;
 		}
+	}
+
+	if (addr > 0x7FFF && addr < 0xA000) //VRAM
+	{
+		VRAM[currentVRAMBank][addr & 0x1FFF] = val;
+		return;
+	}
+
+	if (addr > 0xBFFF && addr < 0xD000) //WRAM bank 0
+	{
+		WRAM[0][addr & 0x0FFF] = val;
+		return;
+	}
+	if (addr > 0xCFFF && addr < 0xE000) //WRAM high bank (cgb mode), WRAM bank 1 in DMG mode
+	{
+		WRAM[currentWRAMBank][addr & 0x0FFF] = val;
+		return;
 	}
 
 	if (addr >= 0xFE00 && addr <= 0xFE9F) // OAM
@@ -295,6 +336,12 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		return;
 	}
 
+	if (addr == 0xFF4F)
+	{
+		currentVRAMBank = val & 0x01;
+		Memory[0xFF4F] = 0xFE | currentVRAMBank;
+	}
+
 	if (addr == 0xFF50) //DMG Bootrom enable. Zero on startup. Non-zero disables bootrom
 	{
 		if (bootRomEnabled && (val & 0x01))
@@ -303,6 +350,33 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 			Memory[0xFF50] = 0x01;
 		}
 		return;
+	}
+
+
+
+	if (addr == 0xFF69) //write to CGB BGPD
+	{
+		cgb_BGP[Memory[0xFF68] & 0x3F] = val;
+		if (Memory[0xFF68] & 0x80)
+		{
+			Memory[0xFF68] = (((Memory[0xFF68] & 0x3F) + 1) & 0x3F) | 0x80; //increment palette index
+		}
+	}
+
+	if (addr == 0xFF6B) //write to CGB OBPD
+	{
+		cgb_OBP[Memory[0xFF6A] & 0x3F] = val;
+		if (Memory[0xFF6A] & 0x80)
+		{
+			Memory[0xFF6A] = (((Memory[0xFF6A] & 0x3F) + 1) & 0x3F) | 0x80; //increment palette index
+		}
+	}
+
+	if (addr == 0xFF70) //wram bank (cgb only)
+	{
+		currentWRAMBank = val & 0x07;
+		if (currentWRAMBank == 0)
+			currentWRAMBank = 1;
 	}
 
 	if (addr > 0xDFFF && addr < 0xFE00) //echo ram
@@ -396,6 +470,42 @@ uint8_t* Mmu::GetROM()
 uint8_t* Mmu::GetDMGBootRom()
 {
 	return &DMGBootROM[0];
+}
+
+uint8_t* Mmu::GetCGBBootRom()
+{
+	return &CGBBootROM[0];
+}
+
+void Mmu::SetCGBMode(bool enableCGB)
+{
+	cgbMode = enableCGB;
+}
+
+bool Mmu::GetCGBMode()
+{
+	return cgbMode;
+}
+
+uint8_t Mmu::ReadVRAMDirect(uint16_t addr, uint8_t bank)
+{
+	return VRAM[bank][addr & 0x1FFF];
+}
+
+uint32_t Mmu::GetBGPColor(uint8_t paletteNum, uint8_t index)
+{
+	//todo: maybe clean this up so it's less ugly
+	uint16_t nativeColor = (cgb_BGP[(paletteNum * 8) + (index * 2) + 1] << 8) | cgb_BGP[(paletteNum * 8) + (index * 2)];
+	uint32_t finalColor = 0xFF000000;
+	finalColor |= (((nativeColor & 0x1F) << 3) | ((nativeColor & 0x1F) >> 2)); //red
+	finalColor |= ((((nativeColor >> 5) & 0x1F) << 3) | (((nativeColor >> 5)  & 0x1F) >> 2)) << 8; //green
+	finalColor |= ((((nativeColor >> 10) & 0x1F) << 3) | (((nativeColor >> 10) & 0x1F) >> 2)) << 16; //blue
+	return finalColor;
+}
+
+uint32_t Mmu::GetOBPColor(uint8_t paletteNum, uint8_t index)
+{
+	return uint16_t();
 }
 
 bool Mmu::isBootRomEnabled()

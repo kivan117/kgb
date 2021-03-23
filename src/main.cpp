@@ -59,11 +59,27 @@ int main(int argc, char* argv[])
 	fileSize = inFile.tellg();
 	inFile.seekg(0, std::ios::beg);
 
-	fileSize = fileSize < 0x100 ? fileSize : 0x100;
-
-	if (!inFile.read((char*)mmu->GetDMGBootRom(), fileSize))
+	if (fileSize == 0x100)
 	{
-		std::cerr << "Error reading file." << std::endl;
+		mmu->SetCGBMode(false);
+		if (!inFile.read((char*)mmu->GetDMGBootRom(), fileSize))
+		{
+			std::cerr << "Error reading file." << std::endl;
+			exit(-1);
+		}
+	}
+	else if (fileSize == 0x900)
+	{
+		mmu->SetCGBMode(true);
+		if (!inFile.read((char*)mmu->GetCGBBootRom(), fileSize))
+		{
+			std::cerr << "Error reading file." << std::endl;
+			exit(-1);
+		}
+	}
+	else
+	{
+		std::cerr << "Invalid boot rom." << std::endl;
 		exit(-1);
 	}
 	inFile.close();
@@ -132,7 +148,10 @@ int main(int argc, char* argv[])
 	SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 	//SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
-	SDL_SetRenderDrawColor(renderer, palette[0] & 0x000000FF, (palette[0] & 0x0000FF00) >> 8, (palette[0] & 0x00FF0000) >> 16, 0xFF);
+	if(mmu->GetCGBMode())
+		SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
+	else
+		SDL_SetRenderDrawColor(renderer, palette[0] & 0x000000FF, (palette[0] & 0x0000FF00) >> 8, (palette[0] & 0x00FF0000) >> 16, 0xFF);
 	SDL_RenderClear(renderer);
 	SDL_RenderPresent(renderer);
 
@@ -162,18 +181,23 @@ int main(int argc, char* argv[])
 		{
 			cpu->ResetTotalCycles();
 
-			uint8_t* fb = ppu->GetFramebuffer();
-
-			for (int y = 0; y < 144; y++)
+			//if DMG use palette
+			if (mmu->GetCGBMode())
 			{
-				for (int x = 0; x < 160; x++)
+				std::memcpy(screen, ppu->GetColorFrameBuffer(), 160 * 144 * sizeof(uint32_t));
+			}
+			else
+			{
+				uint8_t* fb = ppu->GetFramebuffer();
+				for (int y = 0; y < 144; y++)
 				{
-					//if DMG use palette
-					screen[y * 160 + x] = palette[fb[y * 160 + x]];
-					//if CGB use ppu separate colorized buffer directly
-
+					for (int x = 0; x < 160; x++)
+					{
+						screen[y * 160 + x] = palette[fb[y * 160 + x]];
+					}
 				}
 			}
+
 
 			SDL_UpdateTexture(texture, NULL, screen, 4 * 160);
 			SDL_RenderCopy(renderer, texture, NULL, NULL);

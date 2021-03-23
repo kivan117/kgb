@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <array>
 #include <vector>
 #include <iostream>
 #include "FileOps.h"
@@ -8,13 +9,21 @@ class Mmu
 {
 public:
 	Mmu();
-	~Mmu();
 	uint8_t		ReadByte(uint16_t addr);
 	void		WriteByte(uint16_t addr, uint8_t val);
 	uint16_t	ReadWord(uint16_t addr);
 	void		WriteWord(uint16_t addr, uint16_t val);
 	uint8_t*	GetROM();
 	uint8_t*	GetDMGBootRom();
+	uint8_t*    GetCGBBootRom();
+
+	void        SetCGBMode(bool enableCGB);
+	bool		GetCGBMode();
+
+	uint8_t		ReadVRAMDirect(uint16_t addr, uint8_t bank);
+
+	uint32_t	GetBGPColor(uint8_t paletteNum, uint8_t index);
+	uint32_t	GetOBPColor(uint8_t paletteNum, uint8_t index);
 
 	void Tick(uint16_t cycles);
 
@@ -55,6 +64,7 @@ public:
 	} Joypad;
 
 private:
+	bool cgbMode = false;
 	bool bootRomEnabled = true;
 
 	bool DMAInProgress = false;
@@ -79,6 +89,7 @@ private:
 	uint8_t latchedRtcRegValues[5] = { 0 };
 
 	uint8_t DMGBootROM[0x100] = { 0 };
+	uint8_t CGBBootROM[0x900] = { 0 };
 
 	uint8_t ROM[0x800000] = { 0 }; //8 MB, the max CGB rom size. Probably excessive but it should always work.
 
@@ -104,5 +115,15 @@ private:
 	void WriteMBC2(uint16_t addr, uint8_t val);
 	void WriteMBC3(uint16_t addr, uint8_t val);
 	void WriteMBC5(uint16_t addr, uint8_t val);
+
+
+	//ad hoc cgb stuff
+	std::array<uint8_t, 64> cgb_BGP;
+	std::array<uint8_t, 64> cgb_OBP;
+
+	uint8_t currentVRAMBank = 0;
+	uint8_t currentWRAMBank = 1;
+	std::array<std::array<uint8_t, 0x2000>, 2> VRAM;
+	std::array<std::array<uint8_t, 0x1000>, 8> WRAM;
 };
 
