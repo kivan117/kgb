@@ -352,8 +352,6 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		return;
 	}
 
-
-
 	if (addr == 0xFF69) //write to CGB BGPD
 	{
 		cgb_BGP[Memory[0xFF68] & 0x3F] = val;
@@ -387,7 +385,6 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 
 	if (addr > 0xFE9F && addr < 0xFF00) //prohibited area
 		return;
-
 
 	if (addr >= 0xA000 && addr < 0xC000) //external cartridge ram
 	{
@@ -505,7 +502,13 @@ uint32_t Mmu::GetBGPColor(uint8_t paletteNum, uint8_t index)
 
 uint32_t Mmu::GetOBPColor(uint8_t paletteNum, uint8_t index)
 {
-	return uint16_t();
+	//todo: maybe clean this up so it's less ugly
+	uint16_t nativeColor = (cgb_OBP[(paletteNum * 8) + (index * 2) + 1] << 8) | cgb_OBP[(paletteNum * 8) + (index * 2)];
+	uint32_t finalColor = 0xFF000000;
+	finalColor |= (((nativeColor & 0x1F) << 3) | ((nativeColor & 0x1F) >> 2)); //red
+	finalColor |= ((((nativeColor >> 5) & 0x1F) << 3) | (((nativeColor >> 5) & 0x1F) >> 2)) << 8; //green
+	finalColor |= ((((nativeColor >> 10) & 0x1F) << 3) | (((nativeColor >> 10) & 0x1F) >> 2)) << 16; //blue
+	return finalColor;
 }
 
 bool Mmu::isBootRomEnabled()

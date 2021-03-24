@@ -306,7 +306,10 @@ void Ppu::RenderLineCGB()
 			if (bgXFlip)
 				tileX = 7 - tileX;
 
-			WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(bgPaletteNum, (((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01)) );
+			uint8_t colorIndex = (((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01));
+			WorkingFrameBuffer[currentLine * 160 + screenX] = colorIndex;
+			WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(bgPaletteNum, colorIndex);
+			bgPixelPriority[screenX] = bgTilePriorityBit && colorIndex;
 		}
 	}
 	else
@@ -403,34 +406,37 @@ void Ppu::RenderLineCGB()
 			if (winXFlip)
 				tileX = 7 - tileX;
 
-			WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(winPaletteNum, (((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01)));
+			uint8_t colorIndex = (((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01));
+			WorkingFrameBuffer[currentLine * 160 + screenX] = colorIndex;
+			WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(winPaletteNum, colorIndex);
+			bgPixelPriority[screenX] = winTilePriorityBit && colorIndex;
 		}
 
 		windowCounter += windowDrawn;
 	}
 
 
-/*	//render sprites
+	//render sprites
 
 	if (lcdc & SPRITE_ENABLE)
 	{
 		uint8_t spriteHeight = 8 + (((lcdc & 0x04) << 1)); // 8 or 16 tall
-		uint8_t obp_zero[4];
-		uint8_t obp_one[4];
+		//uint8_t obp_zero[4];
+		//uint8_t obp_one[4];
 
 		//ignore the bottom 2 bits on the palettes since color index 0x00 is "transparent" for sprites
-		obp_zero[0] = 0x00;
-		obp_zero[1] = (mmu->ReadByteDirect(0xFF48) >> 2) & 0x03;
-		obp_zero[2] = (mmu->ReadByteDirect(0xFF48) >> 4) & 0x03;
-		obp_zero[3] = (mmu->ReadByteDirect(0xFF48) >> 6) & 0x03;
-		obp_one[0] = 0x00;
-		obp_one[1] = (mmu->ReadByteDirect(0xFF49) >> 2) & 0x03;
-		obp_one[2] = (mmu->ReadByteDirect(0xFF49) >> 4) & 0x03;
-		obp_one[3] = (mmu->ReadByteDirect(0xFF49) >> 6) & 0x03;
+		//obp_zero[0] = 0x00;
+		//obp_zero[1] = (mmu->ReadByteDirect(0xFF48) >> 2) & 0x03;
+		//obp_zero[2] = (mmu->ReadByteDirect(0xFF48) >> 4) & 0x03;
+		//obp_zero[3] = (mmu->ReadByteDirect(0xFF48) >> 6) & 0x03;
+		//obp_one[0] = 0x00;
+		//obp_one[1] = (mmu->ReadByteDirect(0xFF49) >> 2) & 0x03;
+		//obp_one[2] = (mmu->ReadByteDirect(0xFF49) >> 4) & 0x03;
+		//obp_one[3] = (mmu->ReadByteDirect(0xFF49) >> 6) & 0x03;
 
 		for (int pixelX = 8; pixelX < 168; pixelX++)
 		{
-			uint8_t minX = 0; //lowest x value that can be drawn over
+			//uint8_t minX = 0; //lowest x value that can be drawn over
 
 			for (int i = 0; i < lineSpriteCount; i++)
 			{
@@ -438,23 +444,29 @@ void Ppu::RenderLineCGB()
 					continue;
 
 				uint8_t tileY = lineSprites[i].yflip ? ((spriteHeight - 1) - (currentLine - (lineSprites[i].y - 16))) & (spriteHeight - 1) : (currentLine - (lineSprites[i].y - 16)) & (spriteHeight - 1);
-				uint8_t tileDataL = mmu->ReadByteDirect(0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2));
-				uint8_t tileDataH = mmu->ReadByteDirect(0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2) + 1);
+				
+				uint8_t tileDataL = mmu->ReadVRAMDirect((0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2)), lineSprites[i].vram_bank);
+				uint8_t tileDataH = mmu->ReadVRAMDirect((0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2) + 1), lineSprites[i].vram_bank);
+				//uint8_t tileDataL = mmu->ReadByteDirect(0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2));
+				//uint8_t tileDataH = mmu->ReadByteDirect(0x8000 + (lineSprites[i].tile_id * 16) + (tileY * 2) + 1);
+				
 				int16_t coordX = lineSprites[i].x - 8;
 				int subX = (pixelX - 8) - coordX;
 				uint8_t tileX = lineSprites[i].xflip ? 7 - subX : subX;
+				
 				uint8_t color = (((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01));
-				if (lineSprites[i].bg_priority && (WorkingFrameBuffer[currentLine * 160 + coordX + subX] != 0)) //don't draw over background, but do move minX
+				
+				if (lcdc & CGB_BG_PRIORITY)
 				{
-					break;
+					if (bgPixelPriority[coordX + subX])
+						break;
+					if (lineSprites[i].bg_priority && (WorkingFrameBuffer[currentLine * 160 + coordX + subX] != 0)) //don't draw over background, but do move minX
+						break;
 				}
-				else if (color != 0x00) //transparent
+				
+				if (color != 0x00) //transparent
 				{
-					if (lineSprites[i].palette)
-						WorkingFrameBuffer[currentLine * 160 + coordX + subX] = obp_one[color];
-					else
-						WorkingFrameBuffer[currentLine * 160 + coordX + subX] = obp_zero[color];
-
+					WorkingColorFrameBuffer[currentLine * 160 + coordX + subX] = mmu->GetOBPColor(lineSprites[i].palette, color);
 					break;
 				}
 			}
@@ -462,7 +474,7 @@ void Ppu::RenderLineCGB()
 		}
 
 	}
-*/
+
 }
 
 void Ppu::RenderLineDMG()
@@ -470,7 +482,7 @@ void Ppu::RenderLineDMG()
 	uint8_t lcdc = mmu->ReadByteDirect(0xFF40);
 	uint8_t scy = mmu->ReadByteDirect(0xFF42);
 	uint8_t scx = mmu->ReadByteDirect(0xFF43);
-	uint8_t bgp[4];
+	uint8_t bgp[4] = { 0 };
 
 	bgp[0] = mmu->ReadByteDirect(0xFF47) & 0x03;
 	bgp[1] = (mmu->ReadByteDirect(0xFF47) >> 2) & 0x03;
@@ -575,8 +587,8 @@ void Ppu::RenderLineDMG()
 	if (lcdc & SPRITE_ENABLE)
 	{
 		uint8_t spriteHeight = 8 + (((lcdc & 0x04) << 1)); // 8 or 16 tall
-		uint8_t obp_zero[4];
-		uint8_t obp_one[4];
+		uint8_t obp_zero[4] = { 0 };
+		uint8_t obp_one[4] = { 0 };
 
 		//ignore the bottom 2 bits on the palettes since color index 0x00 is "transparent" for sprites
 		obp_zero[0] = 0x00;
@@ -590,7 +602,7 @@ void Ppu::RenderLineDMG()
 
 		for (int pixelX = 8; pixelX < 168; pixelX++)
 		{
-			uint8_t minX = 0; //lowest x value that can be drawn over
+			//uint8_t minX = 0; //lowest x value that can be drawn over
 
 			for (int i = 0; i < lineSpriteCount; i++)
 			{
@@ -648,15 +660,22 @@ void Ppu::SpriteSearch()
 	for (int i = 0; i < 40; i++)
 	{
 		uint8_t offset = i * 4;
-		
+
 		allSprites[i].y = mmu->ReadByteDirect(OAMBaseAddr + offset);
 		allSprites[i].x = mmu->ReadByteDirect(OAMBaseAddr + offset + 1);
 		allSprites[i].tile_id = mmu->ReadByteDirect(OAMBaseAddr + offset + 2);
 		if (spriteHeight > 8) { allSprites[i].tile_id &= 0xFE; };
-		allSprites[i].bg_priority = (mmu->ReadByteDirect(OAMBaseAddr + offset + 3) & 0x80);
-		allSprites[i].yflip = (mmu->ReadByteDirect(OAMBaseAddr + offset + 3) & 0x40);
-		allSprites[i].xflip = (mmu->ReadByteDirect(OAMBaseAddr + offset + 3) & 0x20);
-		allSprites[i].palette = (mmu->ReadByteDirect(OAMBaseAddr + offset + 3) & 0x10) >> 4;
+		uint8_t spriteAttribData = mmu->ReadByteDirect(OAMBaseAddr + offset + 3);
+		allSprites[i].bg_priority = spriteAttribData & 0x80;
+		allSprites[i].yflip = spriteAttribData & 0x40;
+		allSprites[i].xflip = spriteAttribData & 0x20;
+		if (mmu->GetCGBMode())
+		{
+			allSprites[i].vram_bank = (spriteAttribData & 0x08) >> 3;
+			allSprites[i].palette = spriteAttribData & 0x07;
+		}
+		else
+			allSprites[i].palette = (spriteAttribData & 0x10) >> 4;
 	}
 	for (int i = 0; i < 40 && lineSpriteCount < 10; i++)
 	{
@@ -668,7 +687,7 @@ void Ppu::SpriteSearch()
 		}
 	}
 	
-	if(lineSpriteCount > 0)
+	if(lineSpriteCount > 0 && !mmu->GetCGBMode())
 		std::sort(lineSprites.begin(), lineSprites.end());
 
 	return;

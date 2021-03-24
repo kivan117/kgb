@@ -65,6 +65,7 @@ private:
 		bool bg_priority{ false };
 		uint8_t palette{ 0 };
 		uint8_t tile_id{ 0 };
+		uint8_t vram_bank{ 0 };
 
 		inline bool operator <(const Sprite& other) const { if (x != other.x) { return x < other.x; } return index < other.index; };
 
@@ -73,6 +74,8 @@ private:
 	std::array<Sprite, 40> allSprites;
 
 	std::array<Sprite, 10> lineSprites;
+
+	std::array<uint8_t, 160> bgPixelPriority;
 
 	uint8_t lineSpriteCount{ 0 };
 };
