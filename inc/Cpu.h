@@ -101,7 +101,7 @@ private:
 	bool Stopped{ false };
 	bool InterruptsEnabled{ true }; // IME flag. Not mapped to memory
 	bool EI_DelayedInterruptEnableFlag = false; //set by EI, will be checked to turn InterruptsEnabled on one instruction later
-
+	bool isDoubleSpeedEnabled = false;
 	void HandleInterrupts();
 
 

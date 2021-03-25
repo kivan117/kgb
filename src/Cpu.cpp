@@ -36,7 +36,17 @@ void Cpu::Tick()
 	//	PrintCPUState();
 
 	if (Stopped)
+	{
+		uint8_t speedReg = mmu->ReadByte(0xFF4D);
+		if (speedReg & 1)
+		{
+			isDoubleSpeedEnabled = !isDoubleSpeedEnabled;
+			mmu->WriteByteDirect(0xFF4D, 0x80);
+			Stopped = false;
+			CycleCounter = 8200;
+		}
 		return;
+	}
 
 	if (Halted)
 	{

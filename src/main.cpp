@@ -173,7 +173,7 @@ int main(int argc, char* argv[])
 	uint8_t frame_time_index = 0;
 
 
-	while (!cpu->GetStopped() && !userQuit)
+	while (!userQuit)
 	{
 		cpu->Tick();
 

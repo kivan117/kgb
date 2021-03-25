@@ -121,6 +121,10 @@ void Ppu::SetMode(uint8_t mode)
 			reg_if |= 0x02;
 			mmu->WriteByte(0xFF0F, reg_if);
 		}
+
+		if (mmu->isHDMAInProgress())
+			mmu->DoHDMATransfer();
+
 		break;
 	}
 	case(1): //enter vblank

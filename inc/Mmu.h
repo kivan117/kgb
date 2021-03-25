@@ -31,6 +31,10 @@ public:
 
 	bool isDMAInProgress();
 
+	bool isHDMAInProgress();
+
+	void DoHDMATransfer();
+
 	void WriteByteDirect(uint16_t addr, uint8_t val);
 
 	uint8_t	ReadByteDirect(uint16_t addr);
@@ -65,11 +69,20 @@ public:
 
 private:
 	bool cgbMode = false;
+	bool cgbSupport = false;
+	bool sgbSupport = false;
 	bool bootRomEnabled = true;
 
 	bool DMAInProgress = false;
 	uint16_t DMACycles = 0x0000;
 	uint16_t DMABaseAddr = 0x0000;
+
+	bool HDMAInProgress = false;
+	uint16_t HDMATransferredTotal = 0x0000;
+	uint8_t HDMATransferredThisLine = 0x00;
+	uint16_t HDMALength = 0x0000;
+	uint16_t HDMASrcAddr = 0x0000;
+	uint16_t HDMADestAddr = 0x0000;
 
 	uint16_t currentRomBank = 1;
 	uint16_t totalRomBanks  = 2;

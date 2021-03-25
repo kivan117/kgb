@@ -82,6 +82,7 @@ void Mmu::Tick(uint16_t cycles)
 		}
 	}
 
+	//DMG DMA
 	if (!DMAInProgress)
 		return;
 
@@ -336,20 +337,85 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		return;
 	}
 
+	if (addr == 0xFF4D) //prep speed switch. cgb only
+	{
+		Memory[0xFF4D] &= 0x80;
+		Memory[0xFF4D] |= val & 0x01;
+	}
+
 	if (addr == 0xFF4F)
 	{
 		currentVRAMBank = val & 0x01;
 		Memory[0xFF4F] = 0xFE | currentVRAMBank;
 	}
 
-	if (addr == 0xFF50) //DMG Bootrom enable. Zero on startup. Non-zero disables bootrom
+	if (addr == 0xFF50) //Bootrom enable. Zero on startup. Non-zero disables bootrom
 	{
 		if (bootRomEnabled && (val & 0x01))
 		{
 			bootRomEnabled = false;
 			Memory[0xFF50] = 0x01;
+
+			if (cgbMode && (!cgbSupport))
+			{
+				cgbMode = false;
+			}
 		}
 		return;
+	}
+
+	if (addr == 0xFF52) //HDMA Src Addr Low Byte
+	{
+		Memory[0xFF52] = val & 0xF0;
+	}
+
+	if (addr == 0xFF53) //HDMA Dest High Byte
+	{
+		Memory[0xFF53] = val & 0x1F;
+	}
+
+	if (addr == 0xFF54) //HDMA Dest Low Byte
+	{
+		Memory[0xFF54] = val & 0xF0;
+	}
+
+	if (addr == 0xFF55) //TODO: HDMA Transfer Start/Stop
+	{
+		//Memory[0xFF55] = val;
+		if (val & 0x80) //start h-blank dma
+		{
+			HDMAInProgress = true;
+			HDMATransferredTotal = 0;
+			HDMATransferredThisLine = 0;
+			HDMALength = ((val & 0x7F) + 1) << 4;
+			HDMASrcAddr = ((uint16_t)Memory[0xFF51] << 8) | Memory[0xFF52];
+			HDMADestAddr = (((uint16_t)Memory[0xFF53] << 8) | Memory[0xFF54]) & 0x1FFF;
+			Memory[0xFF55] = val & 0x7F;
+			return;
+		}
+		else
+		{
+			if (HDMAInProgress) //stop h-blank dma
+			{
+				HDMAInProgress = false;
+				Memory[0xFF55] |= 0x80;
+				return;
+			}
+			else //perform general dma
+			{
+				uint16_t src = ((uint16_t)Memory[0xFF51] << 8) | Memory[0xFF52];
+				uint16_t dest = (((uint16_t)Memory[0xFF53] << 8) | Memory[0xFF54]) & 0x1FFF;
+
+				uint16_t length = ((val & 0x7F) + 1) << 4;
+
+				for (int i = 0; i < length; i++)
+				{
+					VRAM[currentVRAMBank][dest + i] = ReadByteDirect(src + i);
+				}
+				Memory[0xFF55] = 0xFF;
+				return;
+			}
+		}
 	}
 
 	if (addr == 0xFF69) //write to CGB BGPD
@@ -521,6 +587,32 @@ bool Mmu::isDMAInProgress()
 	return DMAInProgress;
 }
 
+bool Mmu::isHDMAInProgress()
+{
+	return HDMAInProgress;
+}
+
+void Mmu::DoHDMATransfer()
+{
+	uint16_t bytesLeft = HDMALength - HDMATransferredTotal;
+	HDMATransferredThisLine = 0;
+
+	if (bytesLeft)
+	{
+		for (int i = 0; i < 16; i++)
+		{
+			VRAM[currentVRAMBank][HDMADestAddr + HDMATransferredTotal + i] = ReadByteDirect(HDMASrcAddr + HDMATransferredTotal + i);
+		}
+		HDMATransferredTotal += 16;
+		bytesLeft -= 16;
+		if (bytesLeft == 0)
+			HDMAInProgress = false;
+		Memory[0xFF55] = (bytesLeft >> 4) - 1;
+	}
+
+	return;
+}
+
 //bypass safety and write directly to address in memory
 void Mmu::WriteByteDirect(uint16_t addr, uint8_t val)
 {
@@ -529,9 +621,28 @@ void Mmu::WriteByteDirect(uint16_t addr, uint8_t val)
 
 void Mmu::ParseRomHeader(const std::string& romFileName)
 {
+	uint8_t cgb_check = ROM[0x0143];
+	uint8_t sgb_check = ROM[0x0146];
 	uint8_t cart_type = ROM[0x0147];
 	uint8_t rom_size  = ROM[0x0148];
 	uint8_t ram_size  = ROM[0x0149];
+
+	if (((cgb_check & 0xC0) != 0) && ((cgb_check & 0x0C) == 0))
+	{
+		cgbSupport = true;
+	}
+	//else
+	//{
+	//	if (cgbMode)
+	//	{
+	//		//need to load some colorized palettes for DMG game
+	//		//for now, just defaulting to a basic one
+
+	//	}
+	//}
+
+	if (sgb_check == 0x03)
+		sgbSupport = true;
 
 	switch (cart_type)
 	{
