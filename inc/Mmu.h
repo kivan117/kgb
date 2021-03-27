@@ -68,11 +68,15 @@ public:
 		uint8_t a_button      = 0x01;
 	} Joypad;
 
+	uint8_t DMASpeed = 0x01;
+
 private:
 	bool cgbMode = false;
 	bool cgbSupport = false;
 	bool sgbSupport = false;
-	bool bootRomEnabled = false;
+	bool bootRomEnabled = true;
+
+	
 
 	bool DMAInProgress = false;
 	uint16_t DMACycles = 0x0000;

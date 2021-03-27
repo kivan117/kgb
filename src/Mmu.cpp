@@ -105,10 +105,10 @@ void Mmu::Tick(uint16_t cycles)
 
 uint8_t Mmu::ReadByte(uint16_t addr)
 {
-	//if (DMAInProgress && addr < 0xFF80) //DMA conflict on bus and not in HRAM
-	//{
-	//	return ReadByteDirect(DMABaseAddr + (DMACycles / 4) - 2);
-	//}
+	if (DMAInProgress && addr < 0xFF80) //DMA conflict on bus and not in HRAM
+	{
+		return ReadByteDirect(DMABaseAddr + (DMACycles / 4) - 2);
+	}
 
 	return ReadByteDirect(addr);
 }
@@ -684,23 +684,19 @@ void Mmu::ParseRomHeader(const std::string& romFileName)
 		if (cgbMode)
 		{
 			//todo: correctly set CGB palettes for DMG games here
-			cgb_BGP[0] = 0x7C;
-			cgb_BGP[1] = 0x67;
-			cgb_BGP[2] = 0x75;
-			cgb_BGP[3] = 0x4A;
-			cgb_BGP[4] = 0xAE;
-			cgb_BGP[5] = 0x31;
-			cgb_BGP[6] = 0xA5;
-			cgb_BGP[7] = 0x10;
-			
-			cgb_OBP[0] = 0x7C;
-			cgb_OBP[1] = 0x67;
-			cgb_OBP[2] = 0x75;
-			cgb_OBP[3] = 0x4A;
-			cgb_OBP[4] = 0xAE;
-			cgb_OBP[5] = 0x31;
-			cgb_OBP[6] = 0xA5;
-			cgb_OBP[7] = 0x10;
+			//pokemon blue
+			/*[0x0B] = {
+				.BG = { C(0xFFFFFF), C(0x63A5FF), C(0x0000FF), C(0x000000) },
+				.OBJ0 = { C(0xFFFFFF), C(0xFF8484), C(0x943A3A), C(0x000000) },
+				.OBJ1 = { C(0xFFFFFF), C(0x63A5FF), C(0x0000FF), C(0x000000) }
+			},*/
+			//pokemon red
+			//[0x10] = {
+			//	.BG = { C(0xFFFFFF), C(0xFF8484), C(0x943A3A), C(0x000000) },
+			//	.OBJ0 = { C(0xFFFFFF), C(0x7BFF31), C(0x008400), C(0x000000) },
+			//	.OBJ1 = { C(0xFFFFFF), C(0xFF8484), C(0x943A3A), C(0x000000) }
+			//},
+			cgbMode = false;
 		}
 	}
 

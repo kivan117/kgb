@@ -18,8 +18,8 @@ void Ppu::Tick(uint16_t cycles)
 		return;
 	}
 
-	PpuCycles += cycles;
-	PpuTotalCycles += cycles;
+	PpuCycles += cycles / mmu->DMASpeed;
+	PpuTotalCycles += cycles / mmu->DMASpeed;
 
 	switch (currentMode)
 	{

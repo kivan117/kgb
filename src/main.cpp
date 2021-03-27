@@ -179,9 +179,7 @@ int main(int argc, char* argv[])
 	{
 		cpu->Tick();
 
-		//uint8_t cycleMultiplier = cpu->GetDoubleSpeedMode() ? 2 : 1;
-
-		if (cpu->GetTotalCycles() > (456 * 154))
+		if (cpu->GetTotalCycles() > (456 * 154) * mmu->DMASpeed)
 		{
 			cpu->ResetTotalCycles();
 

@@ -97,10 +97,16 @@ void Cpu::Tick()
 		if (speedReg & 1)
 		{
 			isDoubleSpeedEnabled = !isDoubleSpeedEnabled;
-			if(isDoubleSpeedEnabled)
+			if (isDoubleSpeedEnabled)
+			{
 				mmu->WriteByteDirect(0xFF4D, 0xFE);
+				mmu->DMASpeed = 0x02;
+			}
 			else
+			{
 				mmu->WriteByteDirect(0xFF4D, 0x7E);
+				mmu->DMASpeed = 0x01;
+			}
 			Stopped = false;
 			//CycleCounter = 8200;
 		}
@@ -153,7 +159,10 @@ uint64_t Cpu::GetTotalCycles()
 
 void Cpu::ResetTotalCycles()
 {
-	TotalCyclesCounter -= (456*154);
+	if(isDoubleSpeedEnabled)
+		TotalCyclesCounter -= (456 * 154) * 2;
+	else
+		TotalCyclesCounter -= (456*154);
 }
 
 bool Cpu::GetDoubleSpeedMode()
