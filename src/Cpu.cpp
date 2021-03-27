@@ -7,43 +7,102 @@ Cpu::Cpu(Mmu* __mmu, Ppu* __ppu) : mmu(__mmu), ppu(__ppu)
 {
 	if (!mmu->isBootRomEnabled()) //fake it til you make it
 	{
-		//set cpu registers
-		Regs.AF = 0x01B0; //01B0 DMG
-		Regs.BC = 0x0013;
-		Regs.DE = 0x00D8;
-		Regs.HL = 0x014D;
-		SP = 0xFFFE;
-		PC = 0x0100;
+		if (!mmu->GetCGBMode())
+		{
+			//DMG
+			Regs.AF = 0x01B0;
+			Regs.BC = 0x0013;
+			Regs.DE = 0x00D8;
+			Regs.HL = 0x014D;
+			SP = 0xFFFE;
+			PC = 0x0100;
+			UpdateTimers(0xABCC); //set DIV
+		}
+		else 
+		{
+			if (mmu->GetCGBSupport())
+			{
+				//CGB in CGB Mode
+				Regs.AF = 0x1180;
+				Regs.BC = 0x0000;
+				Regs.DE = 0xFF56;
+				Regs.HL = 0x000D;
+				SP = 0xFFFE;
+				PC = 0x0100;
+				UpdateTimers(0x1EA0); //set DIV
+			}
+			else
+			{
+				//CGB in DMG mode
+				Regs.AF = 0x0180;
+				Regs.BC = 0x0000;
+				Regs.DE = 0x0008;
+				Regs.HL = 0x007C;
+				SP = 0xFFFE;
+				PC = 0x0100;
+				UpdateTimers(0x267C); //set DIV
+			}
+		}
+
 		SyncFlagsFromReg();
 
 		//set mmio registers
 		//mmu->WriteByteDirect(0xFF44, 0x90); //stub LY to 0x90 (line 144, begin VBlank)
 		mmu->WriteByteDirect(0xFF00, 0xFF); //stub input, no buttons pressed
-		mmu->WriteByteDirect(0xFF05, 0x00); //TIMA
-		mmu->WriteByteDirect(0xFF06, 0x00); //TMA
-		mmu->WriteByteDirect(0xFF07, 0x00); //TAC
-		mmu->WriteByteDirect(0xFF0F, 0x00); //IF
-		mmu->WriteByteDirect(0xFFFF, 0x00); //IE
-		UpdateTimers(0xABCC); //set DIV
-	}
 
+		mmu->WriteByteDirect(0xFF05, 0x00);// TIMA
+		mmu->WriteByteDirect(0xFF06, 0x00);// TMA
+		mmu->WriteByteDirect(0xFF07, 0x00);// TAC
+		mmu->WriteByteDirect(0xFF0F, 0x00);// IF
+		mmu->WriteByteDirect(0xFF10, 0x80);// NR10
+		mmu->WriteByteDirect(0xFF11, 0xBF);// NR11
+		mmu->WriteByteDirect(0xFF12, 0xF3);// NR12
+		mmu->WriteByteDirect(0xFF14, 0xBF);// NR14
+		mmu->WriteByteDirect(0xFF16, 0x3F);// NR21
+		mmu->WriteByteDirect(0xFF17, 0x00);// NR22
+		mmu->WriteByteDirect(0xFF19, 0xBF);// NR24
+		mmu->WriteByteDirect(0xFF1A, 0x7F);// NR30
+		mmu->WriteByteDirect(0xFF1B, 0xFF);// NR31
+		mmu->WriteByteDirect(0xFF1C, 0x9F);// NR32
+		mmu->WriteByteDirect(0xFF1E, 0xBF);// NR34
+		mmu->WriteByteDirect(0xFF20, 0xFF);// NR41
+		mmu->WriteByteDirect(0xFF21, 0x00);// NR42
+		mmu->WriteByteDirect(0xFF22, 0x00);// NR43
+		mmu->WriteByteDirect(0xFF23, 0xBF);// NR44
+		mmu->WriteByteDirect(0xFF24, 0x77);// NR50
+		mmu->WriteByteDirect(0xFF25, 0xF3);// NR51
+		mmu->WriteByteDirect(0xFF26, 0xF1);// -GB, $F0 - SGB; NR52
+		mmu->WriteByteDirect(0xFF40, 0x91);// LCDC
+		mmu->WriteByteDirect(0xFF42, 0x00);// SCY
+		mmu->WriteByteDirect(0xFF43, 0x00);// SCX
+		mmu->WriteByteDirect(0xFF45, 0x00);// LYC
+		mmu->WriteByteDirect(0xFF47, 0xFC);// BGP
+		mmu->WriteByteDirect(0xFF48, 0xFF);// OBP0
+		mmu->WriteByteDirect(0xFF49, 0xFF);// OBP1
+		mmu->WriteByteDirect(0xFF4A, 0x00);// WY
+		mmu->WriteByteDirect(0xFF4B, 0x00);// WX
+		mmu->WriteByteDirect(0xFFFF, 0x00);// IE
+		mmu->WriteByteDirect(0xFF50, 0x01); //disable boot rom
+		
+	}
+	mmu->WriteByteDirect(0xFF4D, 0x7E);// Speed Switch
 }
 
 void Cpu::Tick()
 {
 
-	//if (PC == 0x100)
-	//	PrintCPUState();
-
 	if (Stopped)
 	{
-		uint8_t speedReg = mmu->ReadByte(0xFF4D);
+		uint8_t speedReg = mmu->ReadByteDirect(0xFF4D);
 		if (speedReg & 1)
 		{
 			isDoubleSpeedEnabled = !isDoubleSpeedEnabled;
-			mmu->WriteByteDirect(0xFF4D, 0x80);
+			if(isDoubleSpeedEnabled)
+				mmu->WriteByteDirect(0xFF4D, 0xFE);
+			else
+				mmu->WriteByteDirect(0xFF4D, 0x7E);
 			Stopped = false;
-			CycleCounter = 8200;
+			//CycleCounter = 8200;
 		}
 		return;
 	}
@@ -95,6 +154,11 @@ uint64_t Cpu::GetTotalCycles()
 void Cpu::ResetTotalCycles()
 {
 	TotalCyclesCounter -= (456*154);
+}
+
+bool Cpu::GetDoubleSpeedMode()
+{
+	return isDoubleSpeedEnabled;
 }
 
 void Cpu::SetZero(int newVal)

@@ -10,6 +10,7 @@ public:
 	bool GetStopped();
 	uint64_t GetTotalCycles();
 	void ResetTotalCycles();
+	bool GetDoubleSpeedMode();
 private:
 	Mmu* mmu;
 	Ppu* ppu;

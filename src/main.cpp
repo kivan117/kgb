@@ -33,10 +33,6 @@ int main(int argc, char* argv[])
 
 	Mmu* mmu = new Mmu();
 
-	Ppu* ppu = new Ppu(mmu);
-
-	Cpu* cpu = new Cpu(mmu, ppu);
-
 	std::ifstream inFile;
 	inFile.open(argv[1], std::ios::in | std::ios::binary);
 	inFile.unsetf(std::ios::skipws);
@@ -101,7 +97,7 @@ int main(int argc, char* argv[])
 
 	uint32_t palette[4];
 
-	memcpy(palette, palette_gbp_gray, sizeof(uint32_t) * 4);
+	memcpy(palette, palette_gbp_green, sizeof(uint32_t) * 4);
 
 	bool enabledGamepad = true;
 	SDL_GameController* controller = NULL;
@@ -173,9 +169,17 @@ int main(int argc, char* argv[])
 	uint8_t frame_time_index = 0;
 
 
+
+
+	Ppu* ppu = new Ppu(mmu);
+
+	Cpu* cpu = new Cpu(mmu, ppu);
+
 	while (!userQuit)
 	{
 		cpu->Tick();
+
+		//uint8_t cycleMultiplier = cpu->GetDoubleSpeedMode() ? 2 : 1;
 
 		if (cpu->GetTotalCycles() > (456 * 154))
 		{

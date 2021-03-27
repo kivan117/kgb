@@ -19,6 +19,7 @@ public:
 
 	void        SetCGBMode(bool enableCGB);
 	bool		GetCGBMode();
+	bool		GetCGBSupport();
 
 	uint8_t		ReadVRAMDirect(uint16_t addr, uint8_t bank);
 
@@ -71,7 +72,7 @@ private:
 	bool cgbMode = false;
 	bool cgbSupport = false;
 	bool sgbSupport = false;
-	bool bootRomEnabled = true;
+	bool bootRomEnabled = false;
 
 	bool DMAInProgress = false;
 	uint16_t DMACycles = 0x0000;

@@ -96,7 +96,6 @@ void Mmu::Tick(uint16_t cycles)
 		if (DMACycles % 4 == 0)
 			Memory[0xFE00 + (DMACycles / 4) - 2] = ReadByteDirect(DMABaseAddr + (DMACycles / 4) - 2);
 	}
-
 	if (DMACycles >= 644)
 	{
 		DMACycles = 0;
@@ -106,10 +105,10 @@ void Mmu::Tick(uint16_t cycles)
 
 uint8_t Mmu::ReadByte(uint16_t addr)
 {
-	if (DMAInProgress && addr < 0xFF80) //DMA conflict on bus and not in HRAM
-	{
-		return ReadByteDirect(DMABaseAddr + (DMACycles / 4) - 2);
-	}
+	//if (DMAInProgress && addr < 0xFF80) //DMA conflict on bus and not in HRAM
+	//{
+	//	return ReadByteDirect(DMABaseAddr + (DMACycles / 4) - 2);
+	//}
 
 	return ReadByteDirect(addr);
 }
@@ -319,6 +318,39 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		return;
 	}
 
+	if (addr == 0xFF1A) // sound channel 3 on/off
+	{
+		//FF1A - NR30 - Channel 3 Sound on / off(R / W)
+		//Bit 7 - Sound Channel 3 Off(0 = Stop, 1 = Playback)  (Read / Write)
+		if (val & 0x80)
+		{
+			Memory[0xFF1A] = 0x80;
+		}
+		else
+		{
+			Memory[0xFF1A] = 0x00;
+			Memory[0xFF26] &= 0x0FB; //turn off channel 3 status
+		}
+		return;
+	}
+
+	if (addr == 0xFF26)
+	{
+		//Bit 7 - All sound on / off(0: stop all sound circuits) (Read / Write)
+		//Bit 3 - Sound 4 ON flag(Read Only)
+		//Bit 2 - Sound 3 ON flag(Read Only)
+		//Bit 1 - Sound 2 ON flag(Read Only)
+		//Bit 0 - Sound 1 ON flag(Read Only)
+		if (val & 0x80)
+		{
+			Memory[0xFF26] |= 0x80;
+		}
+		else
+		{
+			Memory[0xFF26] = 0x00;
+		}
+	}
+
 	if (addr == 0xFF41) //lcd stat
 	{
 		Memory[0xFF41] = (val & 0xF8) | (Memory[0xFF41] & 0x07); //mask off the bottom 3 bits which are read only
@@ -340,13 +372,16 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 	if (addr == 0xFF4D) //prep speed switch. cgb only
 	{
 		Memory[0xFF4D] &= 0x80;
-		Memory[0xFF4D] |= val & 0x01;
+		Memory[0xFF4D] |= 0x7E;
+		Memory[0xFF4D] |= (val & 0x01);
+		return;
 	}
 
 	if (addr == 0xFF4F)
 	{
 		currentVRAMBank = val & 0x01;
 		Memory[0xFF4F] = 0xFE | currentVRAMBank;
+		return;
 	}
 
 	if (addr == 0xFF50) //Bootrom enable. Zero on startup. Non-zero disables bootrom
@@ -356,10 +391,10 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 			bootRomEnabled = false;
 			Memory[0xFF50] = 0x01;
 
-			if (cgbMode && (!cgbSupport))
-			{
-				cgbMode = false;
-			}
+			//if (cgbMode && (!cgbSupport))
+			//{
+			//	cgbMode = false;
+			//}
 		}
 		return;
 	}
@@ -367,16 +402,19 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 	if (addr == 0xFF52) //HDMA Src Addr Low Byte
 	{
 		Memory[0xFF52] = val & 0xF0;
+		return;
 	}
 
 	if (addr == 0xFF53) //HDMA Dest High Byte
 	{
 		Memory[0xFF53] = val & 0x1F;
+		return;
 	}
 
 	if (addr == 0xFF54) //HDMA Dest Low Byte
 	{
 		Memory[0xFF54] = val & 0xF0;
+		return;
 	}
 
 	if (addr == 0xFF55) //TODO: HDMA Transfer Start/Stop
@@ -425,6 +463,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		{
 			Memory[0xFF68] = (((Memory[0xFF68] & 0x3F) + 1) & 0x3F) | 0x80; //increment palette index
 		}
+		return;
 	}
 
 	if (addr == 0xFF6B) //write to CGB OBPD
@@ -434,6 +473,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		{
 			Memory[0xFF6A] = (((Memory[0xFF6A] & 0x3F) + 1) & 0x3F) | 0x80; //increment palette index
 		}
+		return;
 	}
 
 	if (addr == 0xFF70) //wram bank (cgb only)
@@ -441,6 +481,9 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		currentWRAMBank = val & 0x07;
 		if (currentWRAMBank == 0)
 			currentWRAMBank = 1;
+
+		Memory[0xFF70] = 0xF8 | currentWRAMBank;
+		return;
 	}
 
 	if (addr > 0xDFFF && addr < 0xFE00) //echo ram
@@ -550,6 +593,11 @@ bool Mmu::GetCGBMode()
 	return cgbMode;
 }
 
+bool Mmu::GetCGBSupport()
+{
+	return cgbSupport;
+}
+
 uint8_t Mmu::ReadVRAMDirect(uint16_t addr, uint8_t bank)
 {
 	return VRAM[bank][addr & 0x1FFF];
@@ -631,15 +679,30 @@ void Mmu::ParseRomHeader(const std::string& romFileName)
 	{
 		cgbSupport = true;
 	}
-	//else
-	//{
-	//	if (cgbMode)
-	//	{
-	//		//need to load some colorized palettes for DMG game
-	//		//for now, just defaulting to a basic one
-
-	//	}
-	//}
+	else
+	{
+		if (cgbMode)
+		{
+			//todo: correctly set CGB palettes for DMG games here
+			cgb_BGP[0] = 0x7C;
+			cgb_BGP[1] = 0x67;
+			cgb_BGP[2] = 0x75;
+			cgb_BGP[3] = 0x4A;
+			cgb_BGP[4] = 0xAE;
+			cgb_BGP[5] = 0x31;
+			cgb_BGP[6] = 0xA5;
+			cgb_BGP[7] = 0x10;
+			
+			cgb_OBP[0] = 0x7C;
+			cgb_OBP[1] = 0x67;
+			cgb_OBP[2] = 0x75;
+			cgb_OBP[3] = 0x4A;
+			cgb_OBP[4] = 0xAE;
+			cgb_OBP[5] = 0x31;
+			cgb_OBP[6] = 0xA5;
+			cgb_OBP[7] = 0x10;
+		}
+	}
 
 	if (sgb_check == 0x03)
 		sgbSupport = true;
@@ -1118,13 +1181,13 @@ void Mmu::WriteMBC5(uint16_t addr, uint8_t val)
 	{
 		lowBank = val;
 
-		currentRomBank = (hiBank << 8) | lowBank;
+		currentRomBank = ((hiBank << 8) | lowBank);
 		return;
 	}
-	if (addr < 0x4000) // RAM bank 9th bit
+	if (addr < 0x4000) // rom bank 9th bit
 	{
 		hiBank = val & 0x01;
-		currentRomBank = (hiBank << 8) | lowBank;
+		currentRomBank = ((hiBank << 8) | lowBank);
 
 		return;
 	}
