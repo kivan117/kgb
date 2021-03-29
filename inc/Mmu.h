@@ -4,11 +4,12 @@
 #include <vector>
 #include <iostream>
 #include "FileOps.h"
+#include "Apu.h"
 
 class Mmu
 {
 public:
-	Mmu();
+	Mmu(Apu* __apu);
 	uint8_t		ReadByte(uint16_t addr);
 	void		WriteByte(uint16_t addr, uint8_t val);
 	uint16_t	ReadWord(uint16_t addr);
@@ -69,6 +70,8 @@ public:
 	} Joypad;
 
 	uint8_t DMASpeed = 0x01;
+
+	void RegisterApu(Apu* which);
 
 private:
 	bool cgbMode = false;
@@ -143,5 +146,7 @@ private:
 	uint8_t currentWRAMBank = 1;
 	std::array<std::array<uint8_t, 0x2000>, 2> VRAM;
 	std::array<std::array<uint8_t, 0x1000>, 8> WRAM;
+
+	Apu* apu = nullptr;
 };
 

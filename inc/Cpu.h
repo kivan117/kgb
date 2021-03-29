@@ -1,19 +1,26 @@
 #pragma once
 #include "Mmu.h"
 #include "Ppu.h"
+#include "Apu.h"
 #include <stdint.h>
 class Cpu
 {
 public:
-	Cpu(Mmu* __mmu, Ppu* __ppu);
+	Cpu(Mmu* __mmu, Ppu* __ppu, Apu* __apu);
 	void Tick();
 	bool GetStopped();
 	uint64_t GetTotalCycles();
-	void ResetTotalCycles();
+	void SetTotalCycles(uint64_t val);
+	uint64_t GetFrameCycles();
+	void SetFrameCycles(uint64_t val);
 	bool GetDoubleSpeedMode();
+	Apu* apu;
 private:
 	Mmu* mmu;
 	Ppu* ppu;
+
+	SDL_AudioSpec audio_spec;
+	SDL_AudioDeviceID audio_device;
 
 	void Execute(uint8_t op);
 
@@ -108,6 +115,7 @@ private:
 
 	uint64_t CycleCounter{ 0 };
 	uint64_t TotalCyclesCounter{ 0 };
+	uint64_t FrameCyclesCounter{ 0 };
 	uint64_t OpsCounter{ 0 };
 
 	uint64_t div_cycles{ 0 };

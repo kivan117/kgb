@@ -155,12 +155,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\Apu.cpp" />
     <ClCompile Include="src\Cpu.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\Mmu.cpp" />
     <ClCompile Include="src\Ppu.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="inc\Apu.h" />
     <ClInclude Include="inc\Cpu.h" />
     <ClInclude Include="inc\FileOps.h" />
     <ClInclude Include="inc\Mmu.h" />

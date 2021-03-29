@@ -15,6 +15,8 @@ void Ppu::Tick(uint16_t cycles)
 	{
 		if(currentMode)
 			SetMode(0);
+		if (currentLine)
+			SetLine(0);
 		return;
 	}
 

@@ -3,8 +3,58 @@
 #include <iostream>
 #include <iomanip>
 
-Cpu::Cpu(Mmu* __mmu, Ppu* __ppu) : mmu(__mmu), ppu(__ppu)
+void audio_callback(void* user, Uint8* stream, int len) {
+	Cpu* cpu = (Cpu*)user;
+	if (!cpu)
+	{
+		for (int i = 0; i < len; i++)
+		{
+			stream[i] = 0;
+		}
+		return;
+	}
+	//int16_t* audio_stream = (int16_t*)stream;
+	int audio_len = len / 2; // 2 bytes for signed int16
+
+	static double carry_time = 0;
+	int cpu_ticks = len / 4; //audio frames requested
+	double accurate_ticks;
+	if(cpu->GetDoubleSpeedMode())
+		accurate_ticks = (double)cpu_ticks * ((double)0x800000 / (double)48000) + carry_time;
+	else
+		accurate_ticks = (double)cpu_ticks * ((double)0x400000 / (double)48000) + carry_time;
+
+	uint64_t pre_update_cpu_cycles = cpu->GetTotalCycles();
+
+	while ((cpu->GetTotalCycles() - pre_update_cpu_cycles) < accurate_ticks) //tick emulator forward and fill audio buffer
+	{
+		uint64_t tick_cycles = cpu->GetTotalCycles();
+		cpu->Tick();
+		tick_cycles = cpu->GetTotalCycles() - tick_cycles;
+
+		cpu->apu->Update(tick_cycles, cpu->GetDoubleSpeedMode());
+	}
+	
+	carry_time = (cpu->GetTotalCycles() - pre_update_cpu_cycles) - accurate_ticks;
+
+	SDL_AudioStreamGet(cpu->apu->audio_stream, stream, len); //copy audio buffer to audio output
+
+}
+
+Cpu::Cpu(Mmu* __mmu, Ppu* __ppu, Apu* __apu) : mmu(__mmu), ppu(__ppu), apu(__apu)
 {
+	if (apu) {
+		SDL_zero(audio_spec);
+		audio_spec.freq = 48000;
+		audio_spec.format = AUDIO_S16;
+		audio_spec.channels = 2;
+		audio_spec.samples = 1024;
+		audio_spec.userdata = this;
+		audio_spec.callback = audio_callback;
+		audio_device = SDL_OpenAudioDevice(NULL, 0, &audio_spec, NULL, 0);
+		SDL_PauseAudioDevice(audio_device, 0);
+	}
+
 	if (!mmu->isBootRomEnabled()) //fake it til you make it
 	{
 		if (!mmu->GetCGBMode())
@@ -157,12 +207,23 @@ uint64_t Cpu::GetTotalCycles()
 	return TotalCyclesCounter;
 }
 
-void Cpu::ResetTotalCycles()
+void Cpu::SetTotalCycles(uint64_t val)
 {
-	if(isDoubleSpeedEnabled)
-		TotalCyclesCounter -= (456 * 154) * 2;
-	else
-		TotalCyclesCounter -= (456*154);
+	TotalCyclesCounter = val;
+	//if(isDoubleSpeedEnabled)
+	//	TotalCyclesCounter -= (456 * 154) * 2;
+	//else
+	//	TotalCyclesCounter -= (456*154);
+}
+
+uint64_t Cpu::GetFrameCycles()
+{
+	return FrameCyclesCounter;
+}
+
+void Cpu::SetFrameCycles(uint64_t val)
+{
+	FrameCyclesCounter = val;
 }
 
 bool Cpu::GetDoubleSpeedMode()
@@ -398,6 +459,7 @@ void Cpu::UpdateTimers(uint16_t cycles)
 	}
 
 	TotalCyclesCounter += cycles;
+	FrameCyclesCounter += cycles;
 
 }
 

@@ -17,13 +17,9 @@
 //FF80 	FFFE 	High RAM(HRAM)
 //FFFF 	FFFF 	Interrupts Enable Register(IE)
 
-Mmu::Mmu()
+Mmu::Mmu(Apu* __apu) : apu(__apu)
 {
-	//initialize all the various io registers to their correct starting values
-
 	Memory[0xFF00] = 0xFF; //stub initial input to all buttons released
-
-	//std::fill(Memory, Memory + 0x10000, 0xFF);
 }
 
 void Mmu::Tick(uint16_t cycles)
@@ -219,6 +215,14 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 		return value;
 	}
 
+	if (addr == 0xFF26)
+	{
+		if (apu)
+		{
+			return apu->GetAudioEnable();
+		}
+	}
+
 	if (addr == 0xFF69) //read CGB BGPD
 	{
 		return cgb_BGP[Memory[0xFF68] & 0x3F];
@@ -318,19 +322,147 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		return;
 	}
 
-	if (addr == 0xFF1A) // sound channel 3 on/off
+	if (addr == 0xFF10)
 	{
-		//FF1A - NR30 - Channel 3 Sound on / off(R / W)
-		//Bit 7 - Sound Channel 3 Off(0 = Stop, 1 = Playback)  (Read / Write)
-		if (val & 0x80)
-		{
-			Memory[0xFF1A] = 0x80;
-		}
-		else
-		{
-			Memory[0xFF1A] = 0x00;
-			Memory[0xFF26] &= 0x0FB; //turn off channel 3 status
-		}
+		if (apu) { apu->ChannelOneSetSweep(val); }
+		Memory[0xFF10] = val | 0x80;
+		return;
+	}
+
+	if (addr == 0xFF11) // NR11 - Channel 1 Sound Length/Wave Pattern Duty (R/W)
+	{
+		if (apu) { apu->ChannelOneSetLength(val); }
+		Memory[0xFF11] = val | 0x3F;
+		return;
+	}
+
+	if (addr == 0xFF12) // NR12 channel 1 volume
+	{
+		if (apu) { apu->ChannelOneSetVolume(val); }
+		Memory[0xFF12] = val;
+		return;
+	}
+
+	if (addr == 0xFF13) // NR13 - Channel 1 Frequency lo data (W)
+	{
+		//Frequency's lower 8 bits of 11 bit data (x). Next 3 bits are in NR24 ($FF19).
+		if (apu) { apu->ChannelOneSetFreq(val); }
+		Memory[0xFF13] = val;
+		return;
+	}
+
+	if (addr == 0xFF14) // NR14 channel 1 Frequency hi data (R/W)
+	{
+
+		if (apu) { apu->ChannelOneTrigger(val); }
+		Memory[0xFF14] = val | 0xBF;
+
+		return;
+	}
+
+	if (addr == 0xFF16) // NR21 - Channel 2 Sound Length/Wave Pattern Duty (R/W)
+	{
+		if (apu) { apu->ChannelTwoSetLength(val); }
+		Memory[0xFF16] = val | 0x3F;
+		return;
+	}
+
+	if (addr == 0xFF17) // NR22 channel 2 volume
+	{
+		if (apu) { apu->ChannelTwoSetVolume(val); }
+		Memory[0xFF17] = val;
+		return;
+	}
+
+	if (addr == 0xFF18) // NR23 - Channel 2 Frequency lo data (W)
+	{
+		//Frequency's lower 8 bits of 11 bit data (x). Next 3 bits are in NR24 ($FF19).
+		if (apu) { apu->ChannelTwoSetFreq(val); }
+		Memory[0xFF18] = val;
+		return;
+	}
+
+	if (addr == 0xFF19) // NR24 channel 2 Frequency hi data (R/W)
+	{
+		if (apu) { apu->ChannelTwoTrigger(val); }
+		Memory[0xFF19] = (val & 0x40) | 0xBF;
+		return;
+	}
+
+	if (addr == 0xFF1A) // NR30 sound channel 3 on/off
+	{
+		if (apu) { apu->ChannelThreeSetEnable(val); }
+		Memory[0xFF1A] = val | 0x7F;
+		return;
+	}
+
+	if (addr == 0xFF1B) // NR31 sound channel 3 length
+	{
+		if (apu) { apu->ChannelThreeSetLength(val); }
+		Memory[0xFF1B] = val;
+		return;
+	}
+
+	if (addr == 0xFF1C) // NR32 sound channel 3 volume
+	{
+		if (apu) { apu->ChannelThreeSetVolume(val); }
+		Memory[0xFF1C] = val | 0x9F;
+		return;
+	}
+
+	if (addr == 0xFF1D) // NR33 sound channel 3 frequency
+	{
+		if (apu) { apu->ChannelThreeSetFreq(val); }
+		Memory[0xFF1D] = val;
+		return;
+	}
+
+	if (addr == 0xFF1E) // NR34 sound channel 3 trigger
+	{
+		if (apu) { apu->ChannelThreeTrigger(val); }
+		Memory[0xFF1E] = val | 0xBF;
+		return;
+	}
+
+	if (addr == 0xFF20) // NR41 Channel 4 Length
+	{
+		if (apu) { apu->ChannelFourSetLength(val); }
+		Memory[addr] = val | 0xC0;
+		return;
+	}
+
+	if (addr == 0xFF21) // NR42 Channel 4 Vol Envelope
+	{
+		if (apu) { apu->ChannelFourSetVolume(val); }
+		Memory[addr] = val;
+		return;
+	}
+
+	if (addr == 0xFF22) // NR43 Channel 4 Poly Counter
+	{
+		if (apu) { apu->ChannelFourSetPoly(val); }
+		Memory[addr] = val;
+		return;
+	}
+
+	if (addr == 0xFF23) // NR44 Channel 4 Trigger
+	{
+		if (apu) { apu->ChannelFourTrigger(val); }
+		Memory[addr] = val | 0xBF;
+		return;
+	}
+
+	if (addr == 0xFF24)
+	{
+		if (apu) { apu->SetMasterVolume(val); }
+		Memory[addr] = val;
+		return;
+	}
+
+	if (addr == 0xFF25)
+	{
+		if (apu) { apu->SetPan(val); }
+		Memory[addr] = val;
 		return;
 	}
 
@@ -343,12 +475,24 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		//Bit 0 - Sound 1 ON flag(Read Only)
 		if (val & 0x80)
 		{
+			if (apu) { apu->SetAudioEnable(true); }
+
 			Memory[0xFF26] |= 0x80;
 		}
 		else
 		{
+			if (apu) { apu->SetAudioEnable(false); }
+
 			Memory[0xFF26] = 0x00;
 		}
+		return;
+	}
+
+	if (addr >= 0xFF30 && addr <= 0xFF3F)
+	{
+		if (apu) { apu->SetWaveRam(addr & 0x000F, val); }
+		Memory[addr] = val;
+		return;
 	}
 
 	if (addr == 0xFF41) //lcd stat
@@ -1024,6 +1168,11 @@ void Mmu::WriteCartRam(uint16_t addr, uint8_t val)
 
 	std::cout << "Error writing to Cart Ram: " << std::hex << std::setfill('0') << std::uppercase << std::setw(4) << (int)addr << std::endl;
 	return;
+}
+
+void Mmu::RegisterApu(Apu* which)
+{
+	apu = which;
 }
 
 void Mmu::WriteMBC1(uint16_t addr, uint8_t val)
