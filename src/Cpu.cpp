@@ -3,6 +3,8 @@
 #include <iostream>
 #include <iomanip>
 
+#include <fstream>
+
 void audio_callback(void* user, Uint8* stream, int len) {
 	Cpu* cpu = (Cpu*)user;
 	if (!cpu)
@@ -37,7 +39,19 @@ void audio_callback(void* user, Uint8* stream, int len) {
 	
 	carry_time = (cpu->GetTotalCycles() - pre_update_cpu_cycles) - accurate_ticks;
 
+	
 	SDL_AudioStreamGet(cpu->apu->audio_stream, stream, len); //copy audio buffer to audio output
+
+	//std::ofstream output_fstream;
+	//output_fstream.open("audio_dump.raw", std::ios::binary | std::ios::out | std::ios::ate | std::ios::app);
+
+	//auto output_buffer = new uint8_t[len];
+	//SDL_AudioStreamGet(cpu->apu->audio_stream, output_buffer, len);
+	//output_fstream.write((char*)output_buffer, len);
+	//output_fstream.flush();
+	//output_fstream.close();
+
+	//delete[] output_buffer;
 
 }
 
@@ -149,7 +163,7 @@ void Cpu::Tick()
 			isDoubleSpeedEnabled = !isDoubleSpeedEnabled;
 			if (isDoubleSpeedEnabled)
 			{
-				mmu->WriteByteDirect(0xFF4D, 0xFE);
+				mmu->WriteByteDirect(0xFF4D, 0x80);
 				mmu->DMASpeed = 0x02;
 			}
 			else
@@ -157,9 +171,11 @@ void Cpu::Tick()
 				mmu->WriteByteDirect(0xFF4D, 0x7E);
 				mmu->DMASpeed = 0x01;
 			}
-			Stopped = false;
+			//Stopped = false;
 			//CycleCounter = 8200;
 		}
+		PC++;
+		Stopped = false;
 		return;
 	}
 

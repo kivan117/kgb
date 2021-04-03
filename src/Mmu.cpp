@@ -751,10 +751,34 @@ uint32_t Mmu::GetBGPColor(uint8_t paletteNum, uint8_t index)
 {
 	//todo: maybe clean this up so it's less ugly
 	uint16_t nativeColor = (cgb_BGP[(paletteNum * 8) + (index * 2) + 1] << 8) | cgb_BGP[(paletteNum * 8) + (index * 2)];
-	uint32_t finalColor = 0xFF000000;
-	finalColor |= (((nativeColor & 0x1F) << 3) | ((nativeColor & 0x1F) >> 2)); //red
-	finalColor |= ((((nativeColor >> 5) & 0x1F) << 3) | (((nativeColor >> 5)  & 0x1F) >> 2)) << 8; //green
-	finalColor |= ((((nativeColor >> 10) & 0x1F) << 3) | (((nativeColor >> 10) & 0x1F) >> 2)) << 16; //blue
+	uint32_t finalColor = 0x000000FF;
+
+	//finalColor |= (((nativeColor & 0x1F) << 3) | ((nativeColor & 0x1F) >> 2)) << 24; //red
+	//finalColor |= ((((nativeColor >> 5) & 0x1F) << 3) | (((nativeColor >> 5)  & 0x1F) >> 2)) << 16; //green
+	//finalColor |= ((((nativeColor >> 10) & 0x1F) << 3) | (((nativeColor >> 10) & 0x1F) >> 2)) << 8; //blue
+
+	uint8_t  native_red, native_green, native_blue, uncorr_red, uncorr_green, uncorr_blue;
+	uint16_t temp_red, temp_green, temp_blue;
+
+	native_red = (nativeColor & 0x1F);
+	native_green = ((nativeColor >> 5) & 0x1F);
+	native_blue = ((nativeColor >> 10) & 0x1F);
+
+	uncorr_red = ((native_red << 3) | (native_red >> 2));
+	uncorr_green = ((native_green << 3) | (native_green >> 2));
+	uncorr_blue = ((native_blue << 3) | (native_blue >> 2));
+
+	temp_red = ((native_red * 26) + (native_green * 4) + (native_blue * 2));
+	temp_green = ((native_green * 24) + (native_blue * 8));
+	temp_blue = ((native_red * 6) + (native_green * 4) + (native_blue * 22));
+	temp_red = std::min((uint16_t)960, temp_red) >> 2;
+	temp_green = std::min((uint16_t)960, temp_green) >> 2;
+	temp_blue = std::min((uint16_t)960, temp_blue) >> 2;
+
+	finalColor |= (temp_red & 0xFF) << 24;
+	finalColor |= (temp_green & 0xFF) << 16;
+	finalColor |= (temp_blue & 0xFF) << 8;
+
 	return finalColor;
 }
 
@@ -762,10 +786,34 @@ uint32_t Mmu::GetOBPColor(uint8_t paletteNum, uint8_t index)
 {
 	//todo: maybe clean this up so it's less ugly
 	uint16_t nativeColor = (cgb_OBP[(paletteNum * 8) + (index * 2) + 1] << 8) | cgb_OBP[(paletteNum * 8) + (index * 2)];
-	uint32_t finalColor = 0xFF000000;
-	finalColor |= (((nativeColor & 0x1F) << 3) | ((nativeColor & 0x1F) >> 2)); //red
-	finalColor |= ((((nativeColor >> 5) & 0x1F) << 3) | (((nativeColor >> 5) & 0x1F) >> 2)) << 8; //green
-	finalColor |= ((((nativeColor >> 10) & 0x1F) << 3) | (((nativeColor >> 10) & 0x1F) >> 2)) << 16; //blue
+	uint32_t finalColor = 0x000000FF;
+
+	//finalColor |= (((nativeColor & 0x1F) << 3) | ((nativeColor & 0x1F) >> 2)) << 24; //red
+	//finalColor |= ((((nativeColor >> 5) & 0x1F) << 3) | (((nativeColor >> 5) & 0x1F) >> 2)) << 16; //green
+	//finalColor |= ((((nativeColor >> 10) & 0x1F) << 3) | (((nativeColor >> 10) & 0x1F) >> 2)) << 8; //blue
+
+	uint8_t  native_red, native_green, native_blue, uncorr_red, uncorr_green, uncorr_blue;
+	uint16_t temp_red, temp_green, temp_blue;
+
+	native_red   = (nativeColor & 0x1F);
+	native_green = ((nativeColor >> 5) & 0x1F);
+	native_blue  = ((nativeColor >> 10) & 0x1F);
+
+	uncorr_red   = ((native_red   << 3) | (native_red   >> 2));
+	uncorr_green = ((native_green << 3) | (native_green >> 2));
+	uncorr_blue  = ((native_blue  << 3) | (native_blue  >> 2));
+
+	temp_red = ((native_red * 26) + (native_green * 4) + (native_blue * 2));
+	temp_green = ((native_green * 24) + (native_blue * 8));
+	temp_blue = ((native_red * 6) + (native_green * 4) + (native_blue * 22));
+	temp_red = std::min((uint16_t)960, temp_red) >> 2;
+	temp_green = std::min((uint16_t)960, temp_green) >> 2;
+	temp_blue = std::min((uint16_t)960, temp_blue) >> 2;
+
+	finalColor |= (temp_red & 0xFF) << 24;
+	finalColor |= (temp_green & 0xFF) << 16;
+	finalColor |= (temp_blue & 0xFF) << 8;
+
 	return finalColor;
 }
 
@@ -820,29 +868,7 @@ void Mmu::ParseRomHeader(const std::string& romFileName)
 	uint8_t ram_size  = ROM[0x0149];
 
 	if (((cgb_check & 0xC0) != 0) && ((cgb_check & 0x0C) == 0))
-	{
 		cgbSupport = true;
-	}
-	else
-	{
-		if (cgbMode)
-		{
-			//todo: correctly set CGB palettes for DMG games here
-			//pokemon blue
-			/*[0x0B] = {
-				.BG = { C(0xFFFFFF), C(0x63A5FF), C(0x0000FF), C(0x000000) },
-				.OBJ0 = { C(0xFFFFFF), C(0xFF8484), C(0x943A3A), C(0x000000) },
-				.OBJ1 = { C(0xFFFFFF), C(0x63A5FF), C(0x0000FF), C(0x000000) }
-			},*/
-			//pokemon red
-			//[0x10] = {
-			//	.BG = { C(0xFFFFFF), C(0xFF8484), C(0x943A3A), C(0x000000) },
-			//	.OBJ0 = { C(0xFFFFFF), C(0x7BFF31), C(0x008400), C(0x000000) },
-			//	.OBJ1 = { C(0xFFFFFF), C(0xFF8484), C(0x943A3A), C(0x000000) }
-			//},
-			cgbMode = false;
-		}
-	}
 
 	if (sgb_check == 0x03)
 		sgbSupport = true;

@@ -64,6 +64,7 @@ private:
 		bool yflip{ false };
 		bool bg_priority{ false };
 		uint8_t palette{ 0 };
+		uint8_t colorpalette{ 0 };
 		uint8_t tile_id{ 0 };
 		uint8_t vram_bank{ 0 };
 
@@ -78,5 +79,7 @@ private:
 	std::array<uint8_t, 160> bgPixelPriority;
 
 	uint8_t lineSpriteCount{ 0 };
+
+	bool isLCDOn{ true };
 };
 

@@ -5,7 +5,7 @@ extern void audio_callback(void* user, Uint8* stream, int len);
 
 Apu::Apu()
 {
-	audio_spec.freq = 1048576;
+	audio_spec.freq = 2097152;
 	audio_spec.format = AUDIO_S16;
 	audio_spec.channels = 2;
 	audio_stream = SDL_NewAudioStream(AUDIO_S16, 2, 2097152, AUDIO_S16, 2, 48000);
@@ -28,16 +28,17 @@ void Apu::Update(uint64_t tcycles, bool doubleSpeedMode)
 		channel_out[2] = UpdateChannelThree(updateLength);
 		channel_out[3] = UpdateChannelFour(updateLength);
 
-		buffer[0]  = (channel_out[0] * ChannelPan[0]) / 4;
+		buffer[0] = (channel_out[0] * ChannelPan[0])  / 4;
 		buffer[0] += (channel_out[1] * ChannelPan[2]) / 4;
 		buffer[0] += (channel_out[2] * ChannelPan[4]) / 4;
 		buffer[0] += (channel_out[3] * ChannelPan[6]) / 4;
+		buffer[0] *= MasterVolume[0] + 1;
 
 		buffer[1]  = (channel_out[0] * ChannelPan[1]) / 4;
 		buffer[1] += (channel_out[1] * ChannelPan[3]) / 4;
-		buffer[1] += (channel_out[2] * ChannelPan[5]) / 4;
+		buffer[1] += (channel_out[2] * ChannelPan[5]) / 4;		
 		buffer[1] += (channel_out[3] * ChannelPan[7]) / 4;
-
+		buffer[1] *= MasterVolume[1] + 1;
 		if(doubleSpeedMode)
 			SDL_AudioStreamPut(audio_stream, buffer, sizeof(buffer));
 		else
@@ -88,7 +89,7 @@ uint8_t Apu::GetAudioEnable()
 void Apu::SetMasterVolume(uint8_t value)
 {
 	MasterVolume[0] = ((value & 0x70) >> 4);
-	MasterVolume[1] = ((value & 0x70));
+	MasterVolume[1] = ((value & 0x07));
 }
 
 void Apu::SetPan(uint8_t value)
@@ -108,9 +109,16 @@ void Apu::SetPan(uint8_t value)
 
 void Apu::SetWaveRam(uint8_t index, uint8_t value)
 {
-
-	WaveRam[index * 2] = (value & 0xF0) >> 4;
-	WaveRam[(index * 2) + 1] = (value & 0x0F);
+	if (channel_three.enable)
+	{
+		WaveRam[(channel_three.pattern_buffer_counter & 0x1E)] = (value & 0xF0) >> 4;
+		WaveRam[(channel_three.pattern_buffer_counter & 0x1E) + 1] = (value & 0x0F);
+	}
+	else
+	{
+		WaveRam[index * 2] = (value & 0xF0) >> 4;
+		WaveRam[(index * 2) + 1] = (value & 0x0F);
+	}
 
 	return;
 }
@@ -133,7 +141,7 @@ int16_t Apu::UpdateChannelOne(int16_t tcycles)
 		}
 
 		int16_t temp = duty_waveforms[(channel_one.wave_pattern * 8) + channel_one.wave_pattern_counter] ? 1 : -1;
-		temp *= (2048 * channel_one.current_volume);
+		temp *= (256 * channel_one.current_volume);
 		return temp;
 	}
 
@@ -231,7 +239,7 @@ int16_t Apu::UpdateChannelTwo(int16_t tcycles)
 		}
 
 		int16_t temp = duty_waveforms[(channel_two.wave_pattern * 8) + channel_two.wave_pattern_counter] ? 1 : -1;
-		temp *= (2048 * channel_two.current_volume);
+		temp *= (256 * channel_two.current_volume);
 		return temp;
 	}
 
@@ -307,9 +315,13 @@ int16_t Apu::UpdateChannelThree(int16_t tcycles)
 			}
 		}
 
-		return ((4096 * (channel_three.pattern_buffer >> channel_three.volume_shift)) - 30720);
+		return ((512 * (channel_three.pattern_buffer >> channel_three.volume_shift)) - 3840);
+		//return (channel_three.pattern_buffer >> channel_three.volume_shift);
+		////int16_t output = audio_spec.silence;
+		//uint8_t index = ((channel_three.pattern_buffer) >> channel_three.volume_shift);
+		////if (index != 0)
+		//return output;
 	}
-
 	return audio_spec.silence;
 }
 
@@ -338,17 +350,33 @@ void Apu::ChannelThreeTrigger(uint8_t value)
 
 		channel_three.frequency_timer = (2048 - channel_three.frequency) * 2;
 	}
+
+	if(!channel_three.enable)
+		channel_three.playing = false;
 }
 
 void Apu::ChannelThreeSetEnable(uint8_t value)
 {
-	if (audio_master_enable && (value & 0x80))
+	if (value & 0x80)
 	{
-		channel_three.playing = true;
-		channel_three.frequency_timer = (2048 - channel_three.frequency) * 2;
+		channel_three.enable = true;
+		if (audio_master_enable)
+		{
+			channel_three.playing = true;
+			if (channel_three.length_counter == 0)
+				channel_three.length_counter = 0x100;
+			channel_three.pattern_buffer_counter = 0;
+
+			//channel_three.pattern_buffer = WaveRam[channel_three.pattern_buffer_counter];
+
+			channel_three.frequency_timer = (2048 - channel_three.frequency) * 2;
+		}
 	}
 	else
+	{
+		channel_three.enable = false;
 		channel_three.playing = false;
+	}
 }
 
 void Apu::ChannelThreeSetLength(uint8_t value)
@@ -410,7 +438,7 @@ int16_t Apu::UpdateChannelFour(int16_t tcycles)
 		}
 
 		int16_t temp = (channel_four.lfsr & 0x01) ? -1 : 1;
-		temp *= (2048 * channel_four.current_volume);
+		temp *= (256 * channel_four.current_volume);
 		return temp;
 	}
 

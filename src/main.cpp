@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <fstream>
 #include <string>
+#include <sstream>
 #include <vector>
 #include <cassert>
 #include <algorithm>
@@ -32,18 +33,22 @@ int main(int argc, char* argv[])
 
 	}
 
-	const uint32_t palette_gbp_gray[4] = { 0xFFCDDBE0, 0xFF949FA8, 0xFF666B70, 0xFF262B2B };
-	const uint32_t palette_gbp_green[4] = { 0xFFB4F4DB, 0xFF96C3AB, 0xFF78927B, 0xFF5A624C };
-	const uint32_t palette_platinum[4] = { 0xFFE8F0E0, 0xFFB0C0A8, 0xFF687850, 0xFF303018 };
-	const uint32_t palette_luxa[4] = { 0xFFFFE6E6, 0xFFE6BEBE, 0xFF6E5050, 0xFF3C1E1E };
-	const uint32_t palette_bgb[4] = { 0xFFD0F8E0, 0xFF70C088, 0xFF566834, 0xFF201808 };
-	const uint32_t palette_mist[4] = { 0xFFC2F0C4, 0xFFA8B95A, 0xFF6E601E, 0xFF001B2D };
+	
+	const uint32_t palette_gbp_gray[4] = { 0xE0DBCDFF, 0xA89F94FF, 0x706B66FF, 0x2B2B26FF };
+	const uint32_t palette_gbp_green[4] = { 0xDBF4B4FF, 0xABC396FF, 0x7B9278FF, 0x4C625AFF };
+	const uint32_t palette_platinum[4] = { 0xE0F0E8FF, 0xA8C0B0FF, 0x507868FF, 0x183030FF };
+	const uint32_t palette_luxa[4] = { 0xE6E6FFFF, 0xBEBEE6FF, 0x50506EFF, 0x1E1E3CFF };
+	const uint32_t palette_bgb[4] = { 0xE0F8D0FF, 0x88C070FF, 0x346856FF, 0x081820FF };
+	const uint32_t palette_mist[4] = { 0xC4F0C2FF, 0x5AB9A8FF, 0x1E606EFF, 0x2D1B00FF };
 	
 	uint32_t* screen = new uint32_t[160 * 144];
 
 	uint32_t palette[4];
 
-	memcpy(palette, palette_gbp_gray, sizeof(uint32_t) * 4);
+	for (int n = 0; n < 4; n++)
+		palette[n] = palette_gbp_gray[n];
+
+	//memcpy(palette, palette_gbp_gray, sizeof(uint32_t) * 4);
 
 	bool enabledGamepad = true;
 	SDL_GameController* controller = NULL;
@@ -125,11 +130,11 @@ int main(int argc, char* argv[])
 		renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 		SDL_GL_SetSwapInterval(1);
 	}
-	SDL_SetRenderDrawColor(renderer, palette[0] & 0x000000FF, (palette[0] & 0x0000FF00) >> 8, (palette[0] & 0x00FF0000) >> 16, 0xFF);
+	SDL_SetRenderDrawColor(renderer, (palette[0] & 0xFF000000) >> 24, (palette[0] & 0x00FF0000) >> 16, (palette[0] & 0x0000FF00) >> 8, 0xFF);
 	SDL_RenderClear(renderer);
 	SDL_RenderPresent(renderer);
 
-	SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 160, 144);
+	SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 160, 144);
 	
 	Mmu* mmu = new Mmu(apu);
 
@@ -223,7 +228,7 @@ int main(int argc, char* argv[])
 			frame_mus = watch.elapsed<stopwatch::mus>();
 			running_frame_times[frame_time_index] = frame_mus;
 			frame_time_index = (frame_time_index + 1) % 60;
-			if (title_timer.elapsed<stopwatch::ms>() > 500)
+			if (title_timer.elapsed<stopwatch::ms>() > 200)
 			{
 				average_frame_mus = 0;
 				for (int i = 0; i < 60; i++)
@@ -233,12 +238,15 @@ int main(int argc, char* argv[])
 			}
 
 			
-			uint16_t fps = std::floor(1000000.0 / (double)average_frame_mus);
-			std::string title("KGB    FPS: ");
-			title += std::to_string(fps);
-			title += " uS: ";
-			title += std::to_string(average_frame_mus);
-			SDL_SetWindowTitle(window, title.c_str());
+			double fps = 1000000.0 / (double)average_frame_mus;
+			std::stringstream titlestream;
+			titlestream << std::setprecision(4);
+			titlestream << "KGB    FPS: ";
+			titlestream << fps;
+			SDL_SetWindowTitle(window, titlestream.str().c_str());
+			//std::string title("KGB    FPS: ");
+			//title += std::to_string(fps);
+			//SDL_SetWindowTitle(window, title.c_str());
 
 			watch.start();
 

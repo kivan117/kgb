@@ -13,12 +13,22 @@ void Ppu::Tick(uint16_t cycles)
 
 	if (!(lcdc & LCD_ENABLE)) //todo: not sure this is right
 	{
-		if(currentMode)
+		if (isLCDOn)
+		{
+			isLCDOn = false;
+			memset(WorkingColorFrameBuffer, 0xFFFFFFFF, sizeof(WorkingColorFrameBuffer));
+			memset(ColorFrameBuffer, 0xFFFFFFFF, sizeof(ColorFrameBuffer));
+			memset(WorkingFrameBuffer, 0x00, sizeof(WorkingFrameBuffer));
+			memset(FrameBuffer, 0x00, sizeof(FrameBuffer));
+		}
+		if(currentMode != 0)
 			SetMode(0);
-		if (currentLine)
+		if (currentLine != 0)
 			SetLine(0);
 		return;
 	}
+
+	isLCDOn = true;
 
 	PpuCycles += cycles / mmu->DMASpeed;
 	PpuTotalCycles += cycles / mmu->DMASpeed;
@@ -240,6 +250,12 @@ void Ppu::RenderLineCGB()
 	uint8_t scy = mmu->ReadByteDirect(0xFF42);
 	uint8_t scx = mmu->ReadByteDirect(0xFF43);
 
+	uint8_t bgp[4] = { 0 };
+	bgp[0] = mmu->ReadByteDirect(0xFF47) & 0x03;
+	bgp[1] = (mmu->ReadByteDirect(0xFF47) >> 2) & 0x03;
+	bgp[2] = (mmu->ReadByteDirect(0xFF47) >> 4) & 0x03;
+	bgp[3] = (mmu->ReadByteDirect(0xFF47) >> 6) & 0x03;
+
 	//render background
 	if (lcdc)
 	{
@@ -314,7 +330,10 @@ void Ppu::RenderLineCGB()
 
 			uint8_t colorIndex = (((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01));
 			WorkingFrameBuffer[currentLine * 160 + screenX] = colorIndex;
-			WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(bgPaletteNum, colorIndex);
+			if (mmu->GetCGBSupport() || mmu->isBootRomEnabled())
+				WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(bgPaletteNum, colorIndex);
+			else
+				WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(bgPaletteNum, bgp[colorIndex]);
 			bgPixelPriority[screenX] = bgTilePriorityBit && colorIndex;
 		}
 	}
@@ -414,7 +433,10 @@ void Ppu::RenderLineCGB()
 
 			uint8_t colorIndex = (((tileDataH >> (7 - tileX) & 0x01) << 1) | (tileDataL >> (7 - tileX) & 0x01));
 			WorkingFrameBuffer[currentLine * 160 + screenX] = colorIndex;
-			WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(winPaletteNum, colorIndex);
+			if (mmu->GetCGBSupport() || mmu->isBootRomEnabled())
+				WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(winPaletteNum, colorIndex);
+			else
+				WorkingColorFrameBuffer[currentLine * 160 + screenX] = mmu->GetBGPColor(winPaletteNum, bgp[colorIndex]);
 			bgPixelPriority[screenX] = winTilePriorityBit && colorIndex;
 		}
 
@@ -427,18 +449,18 @@ void Ppu::RenderLineCGB()
 	if (lcdc & SPRITE_ENABLE)
 	{
 		uint8_t spriteHeight = 8 + (((lcdc & 0x04) << 1)); // 8 or 16 tall
-		//uint8_t obp_zero[4];
-		//uint8_t obp_one[4];
+		uint8_t obp_zero[4];
+		uint8_t obp_one[4];
 
 		//ignore the bottom 2 bits on the palettes since color index 0x00 is "transparent" for sprites
-		//obp_zero[0] = 0x00;
-		//obp_zero[1] = (mmu->ReadByteDirect(0xFF48) >> 2) & 0x03;
-		//obp_zero[2] = (mmu->ReadByteDirect(0xFF48) >> 4) & 0x03;
-		//obp_zero[3] = (mmu->ReadByteDirect(0xFF48) >> 6) & 0x03;
-		//obp_one[0] = 0x00;
-		//obp_one[1] = (mmu->ReadByteDirect(0xFF49) >> 2) & 0x03;
-		//obp_one[2] = (mmu->ReadByteDirect(0xFF49) >> 4) & 0x03;
-		//obp_one[3] = (mmu->ReadByteDirect(0xFF49) >> 6) & 0x03;
+		obp_zero[0] = 0x00;
+		obp_zero[1] = (mmu->ReadByteDirect(0xFF48) >> 2) & 0x03;
+		obp_zero[2] = (mmu->ReadByteDirect(0xFF48) >> 4) & 0x03;
+		obp_zero[3] = (mmu->ReadByteDirect(0xFF48) >> 6) & 0x03;
+		obp_one[0] = 0x00;
+		obp_one[1] = (mmu->ReadByteDirect(0xFF49) >> 2) & 0x03;
+		obp_one[2] = (mmu->ReadByteDirect(0xFF49) >> 4) & 0x03;
+		obp_one[3] = (mmu->ReadByteDirect(0xFF49) >> 6) & 0x03;
 
 		for (int pixelX = 8; pixelX < 168; pixelX++)
 		{
@@ -472,7 +494,15 @@ void Ppu::RenderLineCGB()
 				
 				if (color != 0x00) //transparent
 				{
-					WorkingColorFrameBuffer[currentLine * 160 + coordX + subX] = mmu->GetOBPColor(lineSprites[i].palette, color);
+					if(mmu->GetCGBSupport() || mmu->isBootRomEnabled())
+						WorkingColorFrameBuffer[currentLine * 160 + coordX + subX] = mmu->GetOBPColor(lineSprites[i].colorpalette, color);
+					else
+					{
+						if(lineSprites[i].palette != 0)
+							WorkingColorFrameBuffer[currentLine * 160 + coordX + subX] = mmu->GetOBPColor(lineSprites[i].colorpalette, obp_one[color]);
+						else
+							WorkingColorFrameBuffer[currentLine * 160 + coordX + subX] = mmu->GetOBPColor(lineSprites[i].colorpalette, obp_zero[color]);
+					}
 					break;
 				}
 			}
@@ -678,10 +708,9 @@ void Ppu::SpriteSearch()
 		if (mmu->GetCGBMode())
 		{
 			allSprites[i].vram_bank = (spriteAttribData & 0x08) >> 3;
-			allSprites[i].palette = spriteAttribData & 0x07;
+			allSprites[i].colorpalette = spriteAttribData & 0x07;
 		}
-		else
-			allSprites[i].palette = (spriteAttribData & 0x10) >> 4;
+		allSprites[i].palette = (spriteAttribData & 0x10) >> 4;
 	}
 	for (int i = 0; i < 40 && lineSpriteCount < 10; i++)
 	{

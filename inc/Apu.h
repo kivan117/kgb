@@ -97,6 +97,7 @@ private:
 
 	struct ch_three {
 		bool playing{ false };
+		bool enable{ false };
 		uint8_t pattern_buffer{ 0 };
 		uint8_t pattern_buffer_counter{ 0 };
 		uint16_t length_counter{ 0 };
@@ -133,7 +134,6 @@ private:
 	int16_t UpdateChannelFour(int16_t tcycles);
 
 	uint8_t WaveRam[32] = { 0 };
-
 	uint8_t divisor_code[8] = { 8, 16, 32, 48, 64, 80, 96, 112 };
 
 	SDL_AudioSpec audio_spec;
