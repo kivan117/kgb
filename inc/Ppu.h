@@ -2,13 +2,15 @@
 #include <iostream>
 #include <array>
 #include "Mmu.h"
+#include <SDL2\SDL.h>
 class Ppu
 {
 public:
-	Ppu(Mmu* __mmu);
+	Ppu(Mmu* __mmu, SDL_Texture* tex, SDL_Renderer* rend);
 	void Tick(uint16_t cycles);
 	uint8_t* GetFramebuffer();
 	uint32_t* GetColorFrameBuffer();
+	bool newFrame{ true };
 private:
 	Mmu* mmu;
 	uint64_t PpuCycles{ 0 };
@@ -16,6 +18,7 @@ private:
 	uint8_t currentMode{ 2 };
 	uint8_t currentLine{ 0 };
 	uint8_t windowCounter{ 0 };
+	bool windowLYTrigger{ false };
 
 	const uint16_t OAM_CYCLES{ 80 };
 	uint16_t DRAW_CYCLES{ 172 };
@@ -71,7 +74,7 @@ private:
 		inline bool operator <(const Sprite& other) const { if (x != other.x) { return x < other.x; } return index < other.index; };
 
 	};
-
+	
 	std::array<Sprite, 40> allSprites;
 
 	std::array<Sprite, 10> lineSprites;
@@ -81,5 +84,19 @@ private:
 	uint8_t lineSpriteCount{ 0 };
 
 	bool isLCDOn{ true };
+
+	bool blendFrames{ false };
+
+	SDL_Texture* ppuTexture{ nullptr };
+	SDL_Renderer* ppuRenderer{ nullptr };
+
+	const uint32_t palette_gbp_gray[4] = { 0xE0DBCDFF, 0xA89F94FF, 0x706B66FF, 0x2B2B26FF };
+	const uint32_t palette_gbp_green[4] = { 0xDBF4B4FF, 0xABC396FF, 0x7B9278FF, 0x4C625AFF };
+	const uint32_t palette_platinum[4] = { 0xE0F0E8FF, 0xA8C0B0FF, 0x507868FF, 0x183030FF };
+	const uint32_t palette_luxa[4] = { 0xE6E6FFFF, 0xBEBEE6FF, 0x50506EFF, 0x1E1E3CFF };
+	const uint32_t palette_bgb[4] = { 0xE0F8D0FF, 0x88C070FF, 0x346856FF, 0x081820FF };
+	const uint32_t palette_mist[4] = { 0xC4F0C2FF, 0x5AB9A8FF, 0x1E606EFF, 0x2D1B00FF };
+
+	uint32_t palette[4] = { 0 };
 };
 

@@ -5,11 +5,12 @@
 #include <iostream>
 #include "FileOps.h"
 #include "Apu.h"
+#include "Serial.h"
 
 class Mmu
 {
 public:
-	Mmu(Apu* __apu);
+	Mmu(Apu* __apu, Serial* __lc);
 	uint8_t		ReadByte(uint16_t addr);
 	void		WriteByte(uint16_t addr, uint8_t val);
 	uint16_t	ReadWord(uint16_t addr);
@@ -148,5 +149,6 @@ private:
 	std::array<std::array<uint8_t, 0x1000>, 8> WRAM;
 
 	Apu* apu = nullptr;
+	Serial* linkCable = nullptr;
 };
 

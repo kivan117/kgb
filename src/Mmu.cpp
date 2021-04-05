@@ -17,10 +17,11 @@
 //FF80 	FFFE 	High RAM(HRAM)
 //FFFF 	FFFF 	Interrupts Enable Register(IE)
 
-Mmu::Mmu(Apu* __apu) : apu(__apu)
+Mmu::Mmu(Apu* __apu, Serial* __lc) : apu(__apu), linkCable(__lc)
 {
 	Memory[0xFF00] = 0xFF; //stub initial input to all buttons released
 }
+
 
 void Mmu::Tick(uint16_t cycles)
 {
@@ -75,6 +76,29 @@ void Mmu::Tick(uint16_t cycles)
 			rtcRegValues[H] &= 0x1F;
 			rtcRegValues[DH] &= 0xC1;
 			
+		}
+	}
+
+	if (linkCable)
+	{
+		if (linkCable->incomingQueue.size() > 0)
+		{
+			if (!linkCable->expectingResponse)
+			{
+				linkCable->outgoingQueue.push(linkCable->SB);
+			}
+			//not expecting a response
+			linkCable->expectingResponse = false;
+			//set the new SB data
+			uint8_t newData = linkCable->incomingQueue.front();
+			linkCable->incomingQueue.pop();
+			linkCable->SB = newData;
+			Memory[0xFF01] = newData;
+
+			//clear the transfer flag
+			Memory[0xFF02] = 0x7C;
+			//trigger a serial interrupt
+			Memory[0xFF0F] |= 0x08;
 		}
 	}
 
@@ -215,6 +239,15 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 		return value;
 	}
 
+	if (addr == 0xFF01)
+	{
+		return Memory[0xFF01];
+	}
+	if (addr == 0xFF02)
+	{
+		return Memory[0xFF02];
+	}
+
 	if (addr == 0xFF26)
 	{
 		if (apu)
@@ -293,19 +326,40 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		return;
 	}
 	
-	if (addr == 0xFF01) //TODO: implement serial. Stubbing serial output for now in order to read the results of blargg's test roms
+	if (addr == 0xFF01)
 	{
 		//std::cout << (char)val << std::flush;
 		Memory[addr] = val;
+		if (linkCable)
+			linkCable->SB = val;
 		return;
 	}
 	if (addr == 0xFF02)
 	{
-		if (val == 0x81)
+		if ((val & 0x81) == 0x81)
 		{
-			std::cout << (char)Memory[0xFF01] << std::flush;
-			Memory[0xFF01] = 0x00;
+			if (linkCable)
+			{
+				if (linkCable->IsConnected())
+				{
+					if (!linkCable->expectingResponse)
+					{
+						linkCable->expectingResponse = true;
+						linkCable->outgoingQueue.push(linkCable->SB);
+					}
+				}
+				else
+				{
+					linkCable->incomingQueue.push(0xFF);
+				}
+			}
+			else
+			{
+				std::cout << (char)Memory[0xFF01] << std::flush;
+				Memory[0xFF01] = 0xFF;
+			}
 		}
+		Memory[addr] = cgbSupport ? (val | 0x7C) : (val | 0x7E);
 		return;
 	}
 

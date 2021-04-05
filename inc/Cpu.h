@@ -3,6 +3,9 @@
 #include "Ppu.h"
 #include "Apu.h"
 #include <stdint.h>
+#include <sstream>
+#include "Stopwatch.h"
+
 class Cpu
 {
 public:
@@ -15,6 +18,16 @@ public:
 	void SetFrameCycles(uint64_t val);
 	bool GetDoubleSpeedMode();
 	Apu* apu;
+
+	void SetThrottle(double setpoint);
+	double GetThrottle();
+
+	stopwatch::Stopwatch watch;
+	stopwatch::Stopwatch title_timer;
+	std::stringstream titlestream;
+	uint64_t frame_mus, average_frame_mus = 1;
+	uint64_t running_frame_times[60] = { 0 };
+	uint8_t frame_time_index = 0;
 private:
 	Mmu* mmu;
 	Ppu* ppu;
@@ -166,5 +179,7 @@ private:
 
 	void UpdatePpu();
 	void UpdateMmu();
+
+	double throttle = 1.0;
 };
 

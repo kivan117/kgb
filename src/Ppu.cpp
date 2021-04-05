@@ -1,10 +1,11 @@
 #include "Ppu.h"
 #include <algorithm>
 
-Ppu::Ppu(Mmu* __mmu) : mmu(__mmu)
+Ppu::Ppu(Mmu* __mmu, SDL_Texture* tex, SDL_Renderer* rend) : mmu(__mmu), ppuTexture(tex), ppuRenderer(rend)
 {
-
+	memcpy(palette, palette_gbp_gray, sizeof(palette));
 }
+
 
 void Ppu::Tick(uint16_t cycles)
 {
@@ -20,6 +21,7 @@ void Ppu::Tick(uint16_t cycles)
 			memset(ColorFrameBuffer, 0xFFFFFFFF, sizeof(ColorFrameBuffer));
 			memset(WorkingFrameBuffer, 0x00, sizeof(WorkingFrameBuffer));
 			memset(FrameBuffer, 0x00, sizeof(FrameBuffer));
+			newFrame = true;
 		}
 		if(currentMode != 0)
 			SetMode(0);
@@ -157,6 +159,7 @@ void Ppu::SetMode(uint8_t mode)
 		mmu->WriteByte(0xFF0F, reg_if);
 
 		windowCounter = 0;
+		windowLYTrigger = false;
 
 		break;
 	}
@@ -171,6 +174,10 @@ void Ppu::SetMode(uint8_t mode)
 			reg_if |= 0x02;
 			mmu->WriteByte(0xFF0F, reg_if);
 		}
+
+		uint8_t wY = mmu->ReadByteDirect(0xFF4A);
+		if (wY == currentLine)
+			windowLYTrigger = true;
 
 		break;
 	}
@@ -349,7 +356,7 @@ void Ppu::RenderLineCGB()
 	uint8_t wY = mmu->ReadByteDirect(0xFF4A);
 	uint8_t wX = mmu->ReadByteDirect(0xFF4B);
 
-	if ((lcdc & WINDOW_ENABLE) && (wY <= currentLine))
+	if ((lcdc & WINDOW_ENABLE) && (wY <= currentLine) && windowLYTrigger)
 	{
 		uint8_t windowDrawn = 0;
 		uint16_t winMapBaseAddr = (lcdc & 0x40) ? 0x9C00 : 0x9800;
@@ -572,7 +579,7 @@ void Ppu::RenderLineDMG()
 	uint8_t wY = mmu->ReadByteDirect(0xFF4A);
 	uint8_t wX = mmu->ReadByteDirect(0xFF4B);
 
-	if ((lcdc & WINDOW_ENABLE) && (lcdc & BG_ENABLE) && (wY <= currentLine))
+	if ((lcdc & WINDOW_ENABLE) && (lcdc & BG_ENABLE) && (wY <= currentLine) && windowLYTrigger)
 	{
 		uint8_t windowDrawn = 0;
 		uint16_t winMapBaseAddr = (lcdc & 0x40) ? 0x9C00 : 0x9800;
@@ -676,9 +683,35 @@ void Ppu::RenderLineDMG()
 void Ppu::RenderFrame()
 {
 	if (mmu->GetCGBMode())
+	{
 		memcpy(ColorFrameBuffer, WorkingColorFrameBuffer, sizeof(uint32_t) * 160 * 144);
+	}
 	else
+	{
 		memcpy(FrameBuffer, WorkingFrameBuffer, sizeof(uint8_t) * 160 * 144);
+
+		for (int y = 0; y < 144; y++)
+		{
+			for (int x = 0; x < 160; x++)
+			{
+				ColorFrameBuffer[y * 160 + x] = palette[FrameBuffer[y * 160 + x]];
+			}
+		}
+	}
+
+	newFrame = true;
+
+	SDL_UpdateTexture(ppuTexture, NULL, ColorFrameBuffer, 4 * 160);
+
+	if (blendFrames)
+	{
+		SDL_SetTextureAlphaMod(ppuTexture, 0xA0);
+		SDL_SetTextureBlendMode(ppuTexture, SDL_BLENDMODE_BLEND);
+	}
+
+	//SDL_RenderCopy(ppuRenderer, ppuTexture, NULL, NULL);
+	//SDL_RenderPresent(ppuRenderer);
+
 }
 
 void Ppu::SpriteSearch()

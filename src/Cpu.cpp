@@ -5,6 +5,8 @@
 
 #include <fstream>
 
+
+
 void audio_callback(void* user, Uint8* stream, int len) {
 	Cpu* cpu = (Cpu*)user;
 	if (!cpu)
@@ -15,16 +17,17 @@ void audio_callback(void* user, Uint8* stream, int len) {
 		}
 		return;
 	}
-	//int16_t* audio_stream = (int16_t*)stream;
+
 	int audio_len = len / 2; // 2 bytes for signed int16
 
 	static double carry_time = 0;
 	int cpu_ticks = len / 4; //audio frames requested
 	double accurate_ticks;
 	if(cpu->GetDoubleSpeedMode())
-		accurate_ticks = (double)cpu_ticks * ((double)0x800000 / (double)48000) + carry_time;
+		accurate_ticks = (double)cpu_ticks * cpu->GetThrottle() * ((double)0x800000 / (double)48000) + carry_time;
 	else
-		accurate_ticks = (double)cpu_ticks * ((double)0x400000 / (double)48000) + carry_time;
+		accurate_ticks = (double)cpu_ticks * cpu->GetThrottle() * ((double)0x400000 / (double)48000) + carry_time;
+
 
 	uint64_t pre_update_cpu_cycles = cpu->GetTotalCycles();
 
@@ -38,20 +41,37 @@ void audio_callback(void* user, Uint8* stream, int len) {
 	}
 	
 	carry_time = (cpu->GetTotalCycles() - pre_update_cpu_cycles) - accurate_ticks;
+		
 
-	
 	SDL_AudioStreamGet(cpu->apu->audio_stream, stream, len); //copy audio buffer to audio output
+	if (std::floor(cpu->GetThrottle()) > 1)
+	{
+		uint8_t* trash = new uint8_t[len];
 
-	//std::ofstream output_fstream;
-	//output_fstream.open("audio_dump.raw", std::ios::binary | std::ios::out | std::ios::ate | std::ios::app);
+		for(int n = 0; n < std::floor(cpu->GetThrottle()) - 1; n++)
+			SDL_AudioStreamGet(cpu->apu->audio_stream, trash, len);
 
-	//auto output_buffer = new uint8_t[len];
-	//SDL_AudioStreamGet(cpu->apu->audio_stream, output_buffer, len);
-	//output_fstream.write((char*)output_buffer, len);
-	//output_fstream.flush();
-	//output_fstream.close();
+		delete[] trash;
+	}
 
-	//delete[] output_buffer;
+	cpu->frame_mus = cpu->watch.elapsed<stopwatch::mus>();
+	cpu->running_frame_times[cpu->frame_time_index] = cpu->frame_mus;
+	cpu->frame_time_index = (cpu->frame_time_index + 1) % 60;
+	if (cpu->title_timer.elapsed<stopwatch::ms>() > 200)
+	{
+		cpu->average_frame_mus = 0;
+		for (int i = 0; i < 60; i++)
+			cpu->average_frame_mus += cpu->running_frame_times[i];
+		cpu->average_frame_mus = cpu->average_frame_mus / 60;
+		cpu->title_timer.start();
+
+		double fps = ((double)(cpu->GetTotalCycles() - pre_update_cpu_cycles) * 1000000.0) / (((double)cpu->average_frame_mus) * 70224.0);
+		cpu->titlestream.str(std::string());
+		cpu->titlestream.precision(4);// << std::setprecision(4);
+		cpu->titlestream << "KGB    FPS: ";
+		cpu->titlestream << fps;
+	}
+	cpu->watch.start();
 
 }
 
@@ -171,7 +191,6 @@ void Cpu::Tick()
 				mmu->WriteByteDirect(0xFF4D, 0x7E);
 				mmu->DMASpeed = 0x01;
 			}
-			//Stopped = false;
 			//CycleCounter = 8200;
 		}
 		PC++;
@@ -245,6 +264,16 @@ void Cpu::SetFrameCycles(uint64_t val)
 bool Cpu::GetDoubleSpeedMode()
 {
 	return isDoubleSpeedEnabled;
+}
+
+void Cpu::SetThrottle(double setpoint)
+{
+	throttle = setpoint;
+}
+
+double Cpu::GetThrottle()
+{
+	return throttle;
 }
 
 void Cpu::SetZero(int newVal)

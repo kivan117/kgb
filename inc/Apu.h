@@ -39,6 +39,8 @@ public:
 	void ChannelFourSetPoly(uint8_t value);
 	void ChannelFourSetVolume(uint8_t value);
 
+	void ToggleMute();
+
 private:
 	
 	uint16_t duty_waveforms[32] = {	0, 0, 0, 0, 0, 0, 1, 0,
@@ -140,4 +142,6 @@ private:
 
 	uint16_t MasterVolume[2] = { 0xFFFF, 0xFFFF };
 	uint16_t ChannelPan[8] = { 1, 1, 1, 1, 1, 1, 1, 1 };
+
+	bool MuteAll{ false };
 };

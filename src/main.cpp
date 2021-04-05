@@ -11,6 +11,7 @@
 #include "Cpu.h"
 #include "Ppu.h"
 #include "Apu.h"
+#include "Serial.h"
 #include "Stopwatch.h"
 
 int main(int argc, char* argv[])
@@ -33,6 +34,24 @@ int main(int argc, char* argv[])
 
 	}
 
+	bool useLinkCable = false;
+	bool isServer = false;
+	std::string remoteAddr = "localhost";
+
+	if (argv[3])
+	{
+		if (strcmp(argv[3], "server") == 0)
+		{
+			useLinkCable = true;
+			isServer = true;
+		}
+		else if (strcmp(argv[3], "client") == 0)
+		{
+			useLinkCable = true;
+			if (argv[4])
+				remoteAddr = argv[4];
+		}
+	}
 	
 	const uint32_t palette_gbp_gray[4] = { 0xE0DBCDFF, 0xA89F94FF, 0x706B66FF, 0x2B2B26FF };
 	const uint32_t palette_gbp_green[4] = { 0xDBF4B4FF, 0xABC396FF, 0x7B9278FF, 0x4C625AFF };
@@ -41,8 +60,10 @@ int main(int argc, char* argv[])
 	const uint32_t palette_bgb[4] = { 0xE0F8D0FF, 0x88C070FF, 0x346856FF, 0x081820FF };
 	const uint32_t palette_mist[4] = { 0xC4F0C2FF, 0x5AB9A8FF, 0x1E606EFF, 0x2D1B00FF };
 	
-	uint32_t* screen = new uint32_t[160 * 144];
+	bool blendFrames = false;
 
+	uint32_t* screen = new uint32_t[160 * 144];
+	memset(screen, 0xFF, sizeof(screen));
 	uint32_t palette[4];
 
 	for (int n = 0; n < 4; n++)
@@ -96,16 +117,6 @@ int main(int argc, char* argv[])
 
 	bool userQuit = false;
 
-	stopwatch::Stopwatch watch;
-	stopwatch::Stopwatch title_timer;
-
-	uint64_t frame_mus, average_frame_mus = 1;
-
-	uint64_t running_frame_times[60] = { 0 };
-	uint8_t frame_time_index = 0;
-
-	
-
 	Apu* apu = nullptr;
 
 	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
@@ -130,13 +141,22 @@ int main(int argc, char* argv[])
 		renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 		SDL_GL_SetSwapInterval(1);
 	}
-	SDL_SetRenderDrawColor(renderer, (palette[0] & 0xFF000000) >> 24, (palette[0] & 0x00FF0000) >> 16, (palette[0] & 0x0000FF00) >> 8, 0xFF);
-	SDL_RenderClear(renderer);
-	SDL_RenderPresent(renderer);
+	//SDL_SetRenderDrawColor(renderer, (palette[0] & 0xFF000000) >> 24, (palette[0] & 0x00FF0000) >> 16, (palette[0] & 0x0000FF00) >> 8, 0xFF);
+	//SDL_RenderClear(renderer);
+	//SDL_RenderPresent(renderer);
 
 	SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 160, 144);
 	
-	Mmu* mmu = new Mmu(apu);
+	Serial* linkCable{ nullptr };
+
+	if (useLinkCable)
+	{
+		SDLNet_Init();
+
+		linkCable = new Serial(isServer, remoteAddr, 11780);
+	}		
+
+	Mmu* mmu = new Mmu(apu, linkCable);
 
 	std::ifstream inFile;
 	inFile.open(argv[1], std::ios::in | std::ios::binary);
@@ -191,64 +211,36 @@ int main(int argc, char* argv[])
 
 	mmu->ParseRomHeader(romFileName);
 	
-	Ppu* ppu = new Ppu(mmu);
+	Ppu* ppu = new Ppu(mmu, texture, renderer);
 	Cpu* cpu = new Cpu(mmu, ppu, apu);
 
 	while (!userQuit)
 	{
+		if (linkCable)
+			linkCable->Tick();
+
 		if(apu == nullptr)
 			cpu->Tick();
+		
+		if (ppu->newFrame)
+		{
+			ppu->newFrame = false;
+			SDL_SetWindowTitle(window, cpu->titlestream.str().c_str());
+			SDL_UpdateTexture(texture, NULL, ppu->GetColorFrameBuffer(), 4 * 160);
 
+			if (blendFrames)
+			{
+				SDL_SetTextureAlphaMod(texture, 0xA0);
+				SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+			}
+
+			SDL_RenderCopy(renderer, texture, NULL, NULL);
+			SDL_RenderPresent(renderer);
+		}
+		
 		if (cpu->GetFrameCycles() > (456 * 154) * mmu->DMASpeed)
 		{
 			cpu->SetFrameCycles(cpu->GetFrameCycles() - ((456 * 154) * mmu->DMASpeed));
-
-			//if DMG use palette
-			if (mmu->GetCGBMode())
-			{
-				std::memcpy(screen, ppu->GetColorFrameBuffer(), 160 * 144 * sizeof(uint32_t));
-			}
-			else
-			{
-				uint8_t* fb = ppu->GetFramebuffer();
-				for (int y = 0; y < 144; y++)
-				{
-					for (int x = 0; x < 160; x++)
-					{
-						screen[y * 160 + x] = palette[fb[y * 160 + x]];
-					}
-				}
-			}
-
-
-			SDL_UpdateTexture(texture, NULL, screen, 4 * 160);
-			SDL_RenderCopy(renderer, texture, NULL, NULL);
-			SDL_RenderPresent(renderer);
-
-			frame_mus = watch.elapsed<stopwatch::mus>();
-			running_frame_times[frame_time_index] = frame_mus;
-			frame_time_index = (frame_time_index + 1) % 60;
-			if (title_timer.elapsed<stopwatch::ms>() > 200)
-			{
-				average_frame_mus = 0;
-				for (int i = 0; i < 60; i++)
-					average_frame_mus += running_frame_times[i];
-				average_frame_mus = average_frame_mus / 60;
-				title_timer.start();
-			}
-
-			
-			double fps = 1000000.0 / (double)average_frame_mus;
-			std::stringstream titlestream;
-			titlestream << std::setprecision(4);
-			titlestream << "KGB    FPS: ";
-			titlestream << fps;
-			SDL_SetWindowTitle(window, titlestream.str().c_str());
-			//std::string title("KGB    FPS: ");
-			//title += std::to_string(fps);
-			//SDL_SetWindowTitle(window, title.c_str());
-
-			watch.start();
 
 			//SDL events to close window
 			while (SDL_PollEvent(&e))
@@ -426,6 +418,20 @@ int main(int argc, char* argv[])
 					{
 						//press right
 						mmu->Joypad.directions &= ~(mmu->Joypad.right);
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_LEFTSHOULDER):
+					{
+						apu->ToggleMute();
+						break;
+					}
+					case(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER):
+					{
+						double currentThrottle = cpu->GetThrottle();
+						currentThrottle *= 2.0;
+						if (currentThrottle > 4.0)
+							currentThrottle = 1.0;
+						cpu->SetThrottle(currentThrottle);
 						break;
 					}
 					default:

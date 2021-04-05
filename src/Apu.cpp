@@ -11,6 +11,11 @@ Apu::Apu()
 	audio_stream = SDL_NewAudioStream(AUDIO_S16, 2, 2097152, AUDIO_S16, 2, 48000);
 }
 
+void Apu::ToggleMute()
+{
+	MuteAll = !MuteAll;
+}
+
 void Apu::Update(uint64_t tcycles, bool doubleSpeedMode)
 {
 	FrameSeqTick(tcycles);
@@ -23,22 +28,31 @@ void Apu::Update(uint64_t tcycles, bool doubleSpeedMode)
 
 		int16_t channel_out[4] = {0,0,0,0};
 		
-		channel_out[0] = UpdateChannelOne(updateLength);
-		channel_out[1] = UpdateChannelTwo(updateLength);
-		channel_out[2] = UpdateChannelThree(updateLength);
-		channel_out[3] = UpdateChannelFour(updateLength);
+		if(!MuteAll)
+		{
+			channel_out[0] = UpdateChannelOne(updateLength);
+			channel_out[1] = UpdateChannelTwo(updateLength);
+			channel_out[2] = UpdateChannelThree(updateLength);
+			channel_out[3] = UpdateChannelFour(updateLength);
 
-		buffer[0] = (channel_out[0] * ChannelPan[0])  / 4;
-		buffer[0] += (channel_out[1] * ChannelPan[2]) / 4;
-		buffer[0] += (channel_out[2] * ChannelPan[4]) / 4;
-		buffer[0] += (channel_out[3] * ChannelPan[6]) / 4;
-		buffer[0] *= MasterVolume[0] + 1;
+			buffer[0] = (channel_out[0] * ChannelPan[0]) / 4;
+			buffer[0] += (channel_out[1] * ChannelPan[2]) / 4;
+			buffer[0] += (channel_out[2] * ChannelPan[4]) / 4;
+			buffer[0] += (channel_out[3] * ChannelPan[6]) / 4;
+			buffer[0] *= MasterVolume[0] + 1;
 
-		buffer[1]  = (channel_out[0] * ChannelPan[1]) / 4;
-		buffer[1] += (channel_out[1] * ChannelPan[3]) / 4;
-		buffer[1] += (channel_out[2] * ChannelPan[5]) / 4;		
-		buffer[1] += (channel_out[3] * ChannelPan[7]) / 4;
-		buffer[1] *= MasterVolume[1] + 1;
+			buffer[1] = (channel_out[0] * ChannelPan[1]) / 4;
+			buffer[1] += (channel_out[1] * ChannelPan[3]) / 4;
+			buffer[1] += (channel_out[2] * ChannelPan[5]) / 4;
+			buffer[1] += (channel_out[3] * ChannelPan[7]) / 4;
+			buffer[1] *= MasterVolume[1] + 1;
+		}
+		else
+		{
+			buffer[0] = audio_spec.silence;
+			buffer[1] = audio_spec.silence;
+		}
+
 		if(doubleSpeedMode)
 			SDL_AudioStreamPut(audio_stream, buffer, sizeof(buffer));
 		else
@@ -94,17 +108,17 @@ void Apu::SetMasterVolume(uint8_t value)
 
 void Apu::SetPan(uint8_t value)
 {
-	ChannelPan[0] = (value & 0x01); //channel 1 left
-	ChannelPan[1] = (value & 0x10) >> 4; //channel 1 right
+	ChannelPan[0] = (value & 0x10) >> 4; //channel 1 left
+	ChannelPan[1] = (value & 0x01);      //channel 1 right
 
-	ChannelPan[2] = (value & 0x02) >> 1; //channel 2 left
-	ChannelPan[3] = (value & 0x20) >> 5; //channel 2 right
+	ChannelPan[2] = (value & 0x20) >> 5; //channel 2 left
+	ChannelPan[3] = (value & 0x02) >> 1; //channel 2 right
+	
+	ChannelPan[4] = (value & 0x40) >> 6; //channel 3 left
+	ChannelPan[5] = (value & 0x04) >> 2; //channel 3 right
 
-	ChannelPan[4] = (value & 0x04) >> 2; //channel 3 left
-	ChannelPan[5] = (value & 0x40) >> 6; //channel 3 right
-
-	ChannelPan[6] = (value & 0x08) >> 3; //channel 4 left
-	ChannelPan[7] = (value & 0x80) >> 7; //channel 4 right
+	ChannelPan[6] = (value & 0x80) >> 7; //channel 4 left
+	ChannelPan[7] = (value & 0x08) >> 3; //channel 4 right
 }
 
 void Apu::SetWaveRam(uint8_t index, uint8_t value)

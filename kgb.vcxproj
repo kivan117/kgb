@@ -144,6 +144,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>C:\Dev\kgb\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <Optimization>Disabled</Optimization>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -160,6 +161,7 @@
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\Mmu.cpp" />
     <ClCompile Include="src\Ppu.cpp" />
+    <ClCompile Include="src\Serial.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\Apu.h" />
@@ -167,6 +169,7 @@
     <ClInclude Include="inc\FileOps.h" />
     <ClInclude Include="inc\Mmu.h" />
     <ClInclude Include="inc\Ppu.h" />
+    <ClInclude Include="inc\Serial.h" />
     <ClInclude Include="inc\Stopwatch.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
