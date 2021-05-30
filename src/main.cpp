@@ -52,24 +52,6 @@ int main(int argc, char* argv[])
 				remoteAddr = argv[4];
 		}
 	}
-	
-	const uint32_t palette_gbp_gray[4] = { 0xE0DBCDFF, 0xA89F94FF, 0x706B66FF, 0x2B2B26FF };
-	const uint32_t palette_gbp_green[4] = { 0xDBF4B4FF, 0xABC396FF, 0x7B9278FF, 0x4C625AFF };
-	const uint32_t palette_platinum[4] = { 0xE0F0E8FF, 0xA8C0B0FF, 0x507868FF, 0x183030FF };
-	const uint32_t palette_luxa[4] = { 0xE6E6FFFF, 0xBEBEE6FF, 0x50506EFF, 0x1E1E3CFF };
-	const uint32_t palette_bgb[4] = { 0xE0F8D0FF, 0x88C070FF, 0x346856FF, 0x081820FF };
-	const uint32_t palette_mist[4] = { 0xC4F0C2FF, 0x5AB9A8FF, 0x1E606EFF, 0x2D1B00FF };
-	
-	bool blendFrames = false;
-
-	uint32_t* screen = new uint32_t[160 * 144];
-	memset(screen, 0xFF, sizeof(screen));
-	uint32_t palette[4];
-
-	for (int n = 0; n < 4; n++)
-		palette[n] = palette_gbp_gray[n];
-
-	//memcpy(palette, palette_gbp_gray, sizeof(uint32_t) * 4);
 
 	bool enabledGamepad = true;
 	SDL_GameController* controller = NULL;
@@ -130,7 +112,7 @@ int main(int argc, char* argv[])
 	{
 		apu = new Apu();
 		SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
-		window = SDL_CreateWindow("kgb", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 576, SDL_WINDOW_OPENGL);
+		window = SDL_CreateWindow("kgb", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 576, SDL_WINDOW_SHOWN);
 		renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 		SDL_GL_SetSwapInterval(0);
 	}
@@ -141,9 +123,6 @@ int main(int argc, char* argv[])
 		renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 		SDL_GL_SetSwapInterval(1);
 	}
-	//SDL_SetRenderDrawColor(renderer, (palette[0] & 0xFF000000) >> 24, (palette[0] & 0x00FF0000) >> 16, (palette[0] & 0x0000FF00) >> 8, 0xFF);
-	//SDL_RenderClear(renderer);
-	//SDL_RenderPresent(renderer);
 
 	SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 160, 144);
 	
@@ -219,28 +198,69 @@ int main(int argc, char* argv[])
 		if (linkCable)
 			linkCable->Tick();
 
-		if(apu == nullptr)
-			cpu->Tick();
-		
-		if (ppu->newFrame)
+		if (apu == nullptr)
 		{
-			ppu->newFrame = false;
-			SDL_SetWindowTitle(window, cpu->titlestream.str().c_str());
-			SDL_UpdateTexture(texture, NULL, ppu->GetColorFrameBuffer(), 4 * 160);
-
-			if (blendFrames)
+			do
 			{
-				SDL_SetTextureAlphaMod(texture, 0xA0);
-				SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-			}
+				cpu->Tick();
+			} while (cpu->GetFrameCycles() < (456 * 154) * mmu->DMASpeed);
+		}
+		else
+		{
+			static double carry_time = 0;
+			int samples_ready = SDL_AudioStreamAvailable(apu->audio_stream);
+			if (samples_ready < cpu->audio_frames_requested)
+			{
+				int cpu_ticks = cpu->audio_frames_requested - samples_ready; //audio frames requested
+				double accurate_ticks;
+				if (cpu->GetDoubleSpeedMode())
+					accurate_ticks = (double)cpu_ticks * cpu->GetThrottle() * ((double)0x800000 / (double)48000) + carry_time;
+				else
+					accurate_ticks = (double)cpu_ticks * cpu->GetThrottle() * ((double)0x400000 / (double)48000) + carry_time;
 
-			SDL_RenderCopy(renderer, texture, NULL, NULL);
-			SDL_RenderPresent(renderer);
+
+				uint64_t pre_update_cpu_cycles = cpu->GetTotalCycles();
+
+				while ((cpu->GetTotalCycles() - pre_update_cpu_cycles) < accurate_ticks) //tick emulator forward and fill audio buffer
+				{
+					uint64_t tick_cycles = cpu->GetTotalCycles();
+					cpu->Tick();
+					tick_cycles = cpu->GetTotalCycles() - tick_cycles;
+
+					cpu->apu->Update(tick_cycles, cpu->GetDoubleSpeedMode());
+				}
+
+				carry_time = (cpu->GetTotalCycles() - pre_update_cpu_cycles) - accurate_ticks;
+				cpu->frame_mus = cpu->watch.elapsed<stopwatch::mus>();
+				cpu->running_frame_times[cpu->frame_time_index] = cpu->frame_mus;
+				cpu->frame_time_index = (cpu->frame_time_index + 1) % 60;
+				if (cpu->title_timer.elapsed<stopwatch::ms>() > 200)
+				{
+					cpu->average_frame_mus = 0;
+					for (int i = 0; i < 60; i++)
+						cpu->average_frame_mus += cpu->running_frame_times[i];
+					cpu->average_frame_mus = cpu->average_frame_mus / 60;
+					cpu->title_timer.start();
+
+					double fps = ((double)(cpu->GetTotalCycles() - pre_update_cpu_cycles) * 1000000.0) / (((double)cpu->average_frame_mus) * 70224.0);
+					if (cpu->GetDoubleSpeedMode())
+						fps *= 0.5;
+					cpu->titlestream.str(std::string());
+					cpu->titlestream.precision(4);// << std::setprecision(4);
+					cpu->titlestream << "KGB    FPS: ";
+					cpu->titlestream << fps;
+				}
+				cpu->watch.start();
+
+
+			}
 		}
 		
 		if (cpu->GetFrameCycles() > (456 * 154) * mmu->DMASpeed)
 		{
 			cpu->SetFrameCycles(cpu->GetFrameCycles() - ((456 * 154) * mmu->DMASpeed));
+
+			SDL_SetWindowTitle(window, cpu->titlestream.str().c_str());
 
 			//SDL events to close window
 			while (SDL_PollEvent(&e))

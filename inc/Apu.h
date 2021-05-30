@@ -33,6 +33,7 @@ public:
 	void ChannelThreeSetLength(uint8_t value);
 	void ChannelThreeSetFreq(uint8_t value);
 	void ChannelThreeSetVolume(uint8_t value);
+	uint8_t ChannelThreeGetLengthEnable();
 
 	void ChannelFourTrigger(uint8_t value);
 	void ChannelFourSetLength(uint8_t value);

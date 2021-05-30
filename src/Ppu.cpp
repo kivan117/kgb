@@ -3,7 +3,20 @@
 
 Ppu::Ppu(Mmu* __mmu, SDL_Texture* tex, SDL_Renderer* rend) : mmu(__mmu), ppuTexture(tex), ppuRenderer(rend)
 {
-	memcpy(palette, palette_gbp_gray, sizeof(palette));
+	memcpy(palette, palette_dmg_green, sizeof(palette));
+	//SDL_RenderClear(ppuRenderer);
+	//SDL_RenderPresent(ppuRenderer);
+	//SDL_SetTextureBlendMode(ppuTexture, SDL_BLENDMODE_BLEND);
+	//SDL_SetTextureAlphaMod(ppuTexture, 0x20);
+	static const unsigned wipeColor = mmu->GetCGBMode() ? 0xFFFFFFFF : 0x909b43FF;
+	for (int i = 0; i < 160 * 144; i++)
+	{
+		WorkingColorFrameBuffer[i] = wipeColor;
+		ColorFrameBuffer[i] = wipeColor;
+		PrevColorFrameBuffer[i] = wipeColor;
+	}
+	memset(FrameBuffer, 0x03, sizeof(FrameBuffer));
+	ppuBlendTexture = SDL_CreateTexture(ppuRenderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 160, 144);
 }
 
 
@@ -17,8 +30,13 @@ void Ppu::Tick(uint16_t cycles)
 		if (isLCDOn)
 		{
 			isLCDOn = false;
-			memset(WorkingColorFrameBuffer, 0xFFFFFFFF, sizeof(WorkingColorFrameBuffer));
-			memset(ColorFrameBuffer, 0xFFFFFFFF, sizeof(ColorFrameBuffer));
+			static const unsigned wipeColor = mmu->GetCGBMode() ? 0xFFFFFFFF : 0x909b43FF;
+			for (int i = 0; i < 160 * 144; i++)
+			{
+				WorkingColorFrameBuffer[i] = wipeColor;
+				ColorFrameBuffer[i] = wipeColor;
+				PrevColorFrameBuffer[i] = wipeColor;
+			}
 			memset(WorkingFrameBuffer, 0x00, sizeof(WorkingFrameBuffer));
 			memset(FrameBuffer, 0x00, sizeof(FrameBuffer));
 			newFrame = true;
@@ -684,12 +702,19 @@ void Ppu::RenderFrame()
 {
 	if (mmu->GetCGBMode())
 	{
+		memcpy(PrevColorFrameBuffer, ColorFrameBuffer, sizeof(uint32_t) * 160 * 144);
 		memcpy(ColorFrameBuffer, WorkingColorFrameBuffer, sizeof(uint32_t) * 160 * 144);
 	}
 	else
 	{
+		for (int y = 0; y < 144; y++)
+		{
+			for (int x = 0; x < 160; x++)
+			{
+				PrevColorFrameBuffer[y * 160 + x] = palette[FrameBuffer[y * 160 + x]];
+			}
+		}
 		memcpy(FrameBuffer, WorkingFrameBuffer, sizeof(uint8_t) * 160 * 144);
-
 		for (int y = 0; y < 144; y++)
 		{
 			for (int x = 0; x < 160; x++)
@@ -697,20 +722,27 @@ void Ppu::RenderFrame()
 				ColorFrameBuffer[y * 160 + x] = palette[FrameBuffer[y * 160 + x]];
 			}
 		}
+		
+		for (int y = 0; y < 144; y++)
+		{
+			for (int x = 0; x < 160; x++)
+			{
+				uint32_t red   = ((((ColorFrameBuffer[y * 160 + x] & 0xFF000000) >> 24) + ((PrevColorFrameBuffer[y * 160 + x] & 0xFF000000) >> 24)) / 2) << 24;
+				uint32_t green = ((((ColorFrameBuffer[y * 160 + x] & 0x00FF0000) >> 16) + ((PrevColorFrameBuffer[y * 160 + x] & 0x00FF0000) >> 16)) / 2) << 16;
+				uint32_t blue  = ((((ColorFrameBuffer[y * 160 + x] & 0x0000FF00) >>  8) + ((PrevColorFrameBuffer[y * 160 + x] & 0x0000FF00) >>  8)) / 2) <<  8;
+				uint32_t alpha = 0x000000FF;
+				ColorFrameBuffer[y * 160 + x] = red | green | blue | alpha;
+			}
+		}
 	}
-
-	newFrame = true;
-
+	
+	SDL_RenderClear(ppuRenderer);
+	/*SDL_UpdateTexture(ppuBlendTexture, NULL, PrevColorFrameBuffer, 4 * 160);
+	SDL_RenderCopy(ppuRenderer, ppuBlendTexture, NULL, NULL);*/
+	
 	SDL_UpdateTexture(ppuTexture, NULL, ColorFrameBuffer, 4 * 160);
-
-	if (blendFrames)
-	{
-		SDL_SetTextureAlphaMod(ppuTexture, 0xA0);
-		SDL_SetTextureBlendMode(ppuTexture, SDL_BLENDMODE_BLEND);
-	}
-
-	//SDL_RenderCopy(ppuRenderer, ppuTexture, NULL, NULL);
-	//SDL_RenderPresent(ppuRenderer);
+	SDL_RenderCopy(ppuRenderer, ppuTexture, NULL, NULL);
+	SDL_RenderPresent(ppuRenderer);
 
 }
 

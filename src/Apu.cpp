@@ -175,13 +175,16 @@ void Apu::ChannelOneTrigger(uint8_t value)
 	if ((value & 0x80) && audio_master_enable)
 	{
 		channel_one.playing = true;
-		if (channel_one.length_enable && channel_one.length_counter == 0)
+		if ((channel_one.length_enable && channel_one.length_counter == 0) || !channel_one.length_enable)
 			channel_one.length_counter = 0x40;
 		channel_one.wave_pattern_counter = 0;
 		channel_one.frequency_timer = (2048 - channel_one.frequency) * 4;
 
 		channel_one.current_volume = channel_one.start_volume;
 		channel_one.volume_period_counter = channel_one.volume_envelope_period;
+
+		if (!(channel_one.start_volume | channel_one.volume_envelope_dir))
+			channel_one.playing = false;
 
 		channel_one.shadow_frequency = channel_one.frequency;
 		channel_one.sweep_period_counter = channel_one.sweep_period ? channel_one.sweep_period : 8;
@@ -225,6 +228,10 @@ void Apu::ChannelOneSetVolume(uint8_t value)
 {
 	channel_one.start_volume = (value & 0xF0) >> 4;
 	channel_one.volume_envelope_dir = (value & 0x08) >> 3;
+
+	if(!(channel_one.start_volume | channel_one.volume_envelope_dir))
+		channel_one.playing = false;
+
 	channel_one.volume_envelope_period = (value & 0x07);
 }
 
@@ -277,13 +284,16 @@ void Apu::ChannelTwoTrigger(uint8_t value)
 	if ((value & 0x80) && audio_master_enable)
 	{
 		channel_two.playing = true;
-		if (channel_two.length_enable && channel_two.length_counter == 0)
+		if ((channel_two.length_enable && channel_two.length_counter == 0) || !channel_two.length_enable)
 			channel_two.length_counter = 0x40;
 		channel_two.wave_pattern_counter = 0;
 		channel_two.frequency_timer = (2048 - channel_two.frequency) * 4;
 
 		channel_two.current_volume = channel_two.start_volume;
 		channel_two.volume_period_counter = channel_two.volume_envelope_period;
+
+		if (!(channel_two.start_volume | channel_two.volume_envelope_dir))
+			channel_two.playing = false;
 	}
 
 }
@@ -307,6 +317,10 @@ void Apu::ChannelTwoSetVolume(uint8_t value)
 {
 	channel_two.start_volume = (value & 0xF0) >> 4;
 	channel_two.volume_envelope_dir = (value & 0x08) >> 3;
+
+	if (!(channel_two.start_volume | channel_two.volume_envelope_dir))
+		channel_two.playing = false;
+
 	channel_two.volume_envelope_period = (value & 0x07);
 }
 
@@ -356,7 +370,7 @@ void Apu::ChannelThreeTrigger(uint8_t value)
 	if ((value & 0x80) && audio_master_enable)
 	{
 		channel_three.playing = true;
-		if (channel_three.length_counter == 0)
+		if (channel_three.length_counter == 0 || !channel_three.length_enable)
 			channel_three.length_counter = 0x100;
 		channel_three.pattern_buffer_counter = 0;
 
@@ -427,6 +441,11 @@ void Apu::ChannelThreeSetVolume(uint8_t value)
 	}
 }
 
+uint8_t Apu::ChannelThreeGetLengthEnable()
+{
+	return channel_three.length_enable << 6;
+}
+
 // channel four
 
 int16_t Apu::UpdateChannelFour(int16_t tcycles)
@@ -470,7 +489,7 @@ void Apu::ChannelFourTrigger(uint8_t value)
 	{
 		channel_four.playing = true;
 
-		if (channel_four.length_enable && channel_four.length_counter == 0)
+		if ((channel_four.length_enable && channel_four.length_counter == 0) || !channel_four.length_enable)
 			channel_four.length_counter = 0x40;
 
 		channel_four.lfsr = 0xFFFF;
@@ -478,6 +497,9 @@ void Apu::ChannelFourTrigger(uint8_t value)
 
 		channel_four.current_volume = channel_four.start_volume;
 		channel_four.volume_period_counter = channel_four.volume_envelope_period;
+
+		if (!(channel_four.start_volume | channel_four.volume_envelope_dir))
+			channel_four.playing = false;
 	}
 }
 
@@ -498,6 +520,10 @@ void Apu::ChannelFourSetVolume(uint8_t value)
 {
 	channel_four.start_volume = (value & 0xF0) >> 4;
 	channel_four.volume_envelope_dir = (value & 0x08) >> 3;
+
+	if (!(channel_four.start_volume | channel_four.volume_envelope_dir))
+		channel_four.playing = false;
+
 	channel_four.volume_envelope_period = (value & 0x07);
 }
 
@@ -539,7 +565,8 @@ void Apu::FrameSeqTick(uint16_t tcycles)
 
 void Apu::FrameSeqLengthStep()
 {
-	if (channel_one.playing && channel_one.length_enable)
+	//if (channel_one.playing && channel_one.length_enable)
+	if (channel_one.length_enable)
 	{
 		channel_one.length_counter--;
 		if (channel_one.length_counter == 0)
@@ -548,7 +575,8 @@ void Apu::FrameSeqLengthStep()
 		}
 	}
 
-	if (channel_two.playing && channel_two.length_enable)
+	//if (channel_two.playing && channel_two.length_enable)
+	if (channel_two.length_enable)
 	{
 		channel_two.length_counter--;
 		if (channel_two.length_counter == 0)
@@ -556,17 +584,21 @@ void Apu::FrameSeqLengthStep()
 			channel_two.playing = false;
 		}
 	}
-
-	if (channel_three.playing && channel_three.length_enable)
+	
+	//if (channel_three.playing && channel_three.length_enable)
+	if (channel_three.length_enable)
 	{
 		channel_three.length_counter--;
 		if (channel_three.length_counter == 0)
 		{
+			channel_three.length_enable = false;
+			channel_three.enable = false;
 			channel_three.playing = false;
 		}
 	}
 
-	if (channel_four.playing && channel_four.length_enable)
+	//if (channel_four.playing && channel_four.length_enable)
+	if (channel_four.length_enable)
 	{
 		channel_four.length_counter--;
 		if (channel_four.length_counter == 0)

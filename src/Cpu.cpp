@@ -17,62 +17,25 @@ void audio_callback(void* user, Uint8* stream, int len) {
 		}
 		return;
 	}
-
-	int audio_len = len / 2; // 2 bytes for signed int16
-
-	static double carry_time = 0;
-	int cpu_ticks = len / 4; //audio frames requested
-	double accurate_ticks;
-	if(cpu->GetDoubleSpeedMode())
-		accurate_ticks = (double)cpu_ticks * cpu->GetThrottle() * ((double)0x800000 / (double)48000) + carry_time;
-	else
-		accurate_ticks = (double)cpu_ticks * cpu->GetThrottle() * ((double)0x400000 / (double)48000) + carry_time;
-
-
-	uint64_t pre_update_cpu_cycles = cpu->GetTotalCycles();
-
-	while ((cpu->GetTotalCycles() - pre_update_cpu_cycles) < accurate_ticks) //tick emulator forward and fill audio buffer
+	if (!cpu->apu)
 	{
-		uint64_t tick_cycles = cpu->GetTotalCycles();
-		cpu->Tick();
-		tick_cycles = cpu->GetTotalCycles() - tick_cycles;
-
-		cpu->apu->Update(tick_cycles, cpu->GetDoubleSpeedMode());
+		for (int i = 0; i < len; i++)
+		{
+			stream[i] = 0;
+		}
+		return;
 	}
-	
-	carry_time = (cpu->GetTotalCycles() - pre_update_cpu_cycles) - accurate_ticks;
-		
-
+	cpu->audio_frames_requested = len;
 	SDL_AudioStreamGet(cpu->apu->audio_stream, stream, len); //copy audio buffer to audio output
 	if (std::floor(cpu->GetThrottle()) > 1)
 	{
 		uint8_t* trash = new uint8_t[len];
 
-		for(int n = 0; n < std::floor(cpu->GetThrottle()) - 1; n++)
+		for (int n = 0; n < std::floor(cpu->GetThrottle()) - 1; n++)
 			SDL_AudioStreamGet(cpu->apu->audio_stream, trash, len);
 
 		delete[] trash;
 	}
-
-	cpu->frame_mus = cpu->watch.elapsed<stopwatch::mus>();
-	cpu->running_frame_times[cpu->frame_time_index] = cpu->frame_mus;
-	cpu->frame_time_index = (cpu->frame_time_index + 1) % 60;
-	if (cpu->title_timer.elapsed<stopwatch::ms>() > 200)
-	{
-		cpu->average_frame_mus = 0;
-		for (int i = 0; i < 60; i++)
-			cpu->average_frame_mus += cpu->running_frame_times[i];
-		cpu->average_frame_mus = cpu->average_frame_mus / 60;
-		cpu->title_timer.start();
-
-		double fps = ((double)(cpu->GetTotalCycles() - pre_update_cpu_cycles) * 1000000.0) / (((double)cpu->average_frame_mus) * 70224.0);
-		cpu->titlestream.str(std::string());
-		cpu->titlestream.precision(4);// << std::setprecision(4);
-		cpu->titlestream << "KGB    FPS: ";
-		cpu->titlestream << fps;
-	}
-	cpu->watch.start();
-
 }
 
 Cpu::Cpu(Mmu* __mmu, Ppu* __ppu, Apu* __apu) : mmu(__mmu), ppu(__ppu), apu(__apu)

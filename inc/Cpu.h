@@ -28,6 +28,7 @@ public:
 	uint64_t frame_mus, average_frame_mus = 1;
 	uint64_t running_frame_times[60] = { 0 };
 	uint8_t frame_time_index = 0;
+	uint64_t audio_frames_requested{ 0 };
 private:
 	Mmu* mmu;
 	Ppu* ppu;
