@@ -72,6 +72,9 @@ public:
 
 	uint8_t DMASpeed = 0x01;
 
+	bool rumbleActive{ false };
+	uint64_t rumbleStrength{ 0 };
+
 	void RegisterApu(Apu* which);
 
 private:
@@ -118,6 +121,7 @@ private:
 	uint8_t Memory[0x10000] = { 0 }; //the currently active mapped memory
 
 	bool hasSaveBattery = false;
+	bool hasRumble = false;
 
 	std::vector<uint8_t> CartRam;
 

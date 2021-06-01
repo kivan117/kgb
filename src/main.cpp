@@ -54,7 +54,9 @@ int main(int argc, char* argv[])
 	}
 
 	bool enabledGamepad = true;
+	bool enableControllerHaptic = false;
 	SDL_GameController* controller = NULL;
+	SDL_Haptic* controllerHaptic = NULL;
 	
 	bool enabledAudio = true;
 
@@ -92,8 +94,32 @@ int main(int argc, char* argv[])
 	if (controller)
 	{
 		SDL_GameControllerAddMappingsFromFile("gamecontrollerdb.txt");
+
+		//try rumble
+		
+		if (SDL_Init(SDL_INIT_HAPTIC) < 0)
+			std::cout << "SDL could not initialize gamepad rumble subsystem. SDL_Error: " << SDL_GetError() << std::endl;
+		else
+			enableControllerHaptic = true;
 	}
 
+	if (enableControllerHaptic)
+	{
+		controllerHaptic = SDL_HapticOpenFromJoystick(SDL_GameControllerGetJoystick(controller));
+		if (!controllerHaptic)
+		{
+			std::cout << "SDL could not initialize gamepad rumble. Controller may not support rumble. " << SDL_GetError() << std::endl;
+			enableControllerHaptic = false;
+		}
+		else
+		{
+			if (SDL_HapticRumbleInit(controllerHaptic) < 0)
+			{
+				std::cout << "SDL could not initialize gamepad rumble. Controller may not support rumble. " << SDL_GetError() << std::endl;
+				enableControllerHaptic = false;
+			}
+		}
+	}
 
 	SDL_Event e;
 
@@ -200,6 +226,7 @@ int main(int argc, char* argv[])
 
 		if (apu == nullptr)
 		{
+			//run one frame
 			do
 			{
 				cpu->Tick();
@@ -261,6 +288,23 @@ int main(int argc, char* argv[])
 			cpu->SetFrameCycles(cpu->GetFrameCycles() - ((456 * 154) * mmu->DMASpeed));
 
 			SDL_SetWindowTitle(window, cpu->titlestream.str().c_str());
+
+			if (enableControllerHaptic)
+			{
+				if (mmu->rumbleStrength)
+				{
+					//Play rumble at 75% strenght for 500 milliseconds
+					if (SDL_HapticRumblePlay(controllerHaptic, (double)mmu->rumbleStrength / (double)((456 * 154) * mmu->DMASpeed), 250) != 0)
+					{
+						printf("Warning: Unable to play rumble! %s\n", SDL_GetError());
+					}
+					mmu->rumbleStrength = 0;
+				}
+				//else
+				//{
+				//	SDL_HapticStopAll(controllerHaptic);
+				//}
+			}
 
 			//SDL events to close window
 			while (SDL_PollEvent(&e))
@@ -613,6 +657,10 @@ int main(int argc, char* argv[])
 	}
 
 	mmu->SaveGame(romFileName);
-
+	if (enableControllerHaptic)
+	{
+		SDL_HapticStopAll(controllerHaptic);
+		SDL_HapticClose(controllerHaptic);
+	}
 	return 0;
 }

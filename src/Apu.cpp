@@ -22,7 +22,7 @@ void Apu::Update(uint64_t tcycles, bool doubleSpeedMode)
 
 	static int16_t buffer[2];
 
-	for (int64_t i = 0; i < tcycles; i += 4)
+	for (uint64_t i = 0; i < tcycles; i += 4)
 	{
 		uint16_t updateLength = doubleSpeedMode ? 2 : 4;
 
@@ -75,6 +75,7 @@ void Apu::SetAudioEnable(bool enable)
 		channel_one.playing = false;
 		channel_two.playing = false;
 		channel_three.playing = false;
+		channel_four.playing = false;
 	}
 }
 
@@ -85,8 +86,8 @@ uint8_t Apu::GetAudioEnable()
 	if (audio_master_enable)
 		channels |= 0x80;
 
-	//if (channel_four.playing)
-	//	channels |= 0x08;
+	if (channel_four.playing)
+		channels |= 0x08;
 
 	if (channel_three.playing)
 		channels |= 0x04;
@@ -166,7 +167,11 @@ void Apu::ChannelOneTrigger(uint8_t value)
 {
 
 	if (value & 0x40)
+	{
+		//if((!channel_one.length_enable) && (channel_one.length_counter != 0) && (channel_one.length_counter > ((0x40 - channel_one.length_counter_setpoint) / 2)))
+		//	channel_one.length_counter--;
 		channel_one.length_enable = true;
+	}
 	else
 		channel_one.length_enable = false;
 
@@ -275,7 +280,11 @@ void Apu::ChannelTwoTrigger(uint8_t value)
 	//Bit 2 - 0 - Frequency's higher 3 bits (x) (Write Only)`
 
 	if (value & 0x40)
+	{
+		//if (!channel_two.length_enable && channel_two.length_counter && (channel_two.length_counter < (channel_two.length_counter_setpoint / 2)))
+		//	channel_two.length_counter--;
 		channel_two.length_enable = true;
+	}
 	else
 		channel_two.length_enable = false;
 
@@ -361,7 +370,12 @@ void Apu::ChannelThreeTrigger(uint8_t value)
 	//	Bit 2 - 0 - Frequency's higher 3 bits (x) (Write Only)`
 
 	if (value & 0x40)
+	{
+		//if (!channel_three.length_enable && channel_three.length_counter && (channel_three.length_counter < (channel_three.length_counter_setpoint / 2)))
+		//	channel_three.length_counter--;
+
 		channel_three.length_enable = true;
+	}
 	else
 		channel_three.length_enable = false;
 
@@ -390,7 +404,7 @@ void Apu::ChannelThreeSetEnable(uint8_t value)
 		channel_three.enable = true;
 		if (audio_master_enable)
 		{
-			channel_three.playing = true;
+			//channel_three.playing = true;
 			if (channel_three.length_counter == 0)
 				channel_three.length_counter = 0x100;
 			channel_three.pattern_buffer_counter = 0;
@@ -410,8 +424,8 @@ void Apu::ChannelThreeSetEnable(uint8_t value)
 void Apu::ChannelThreeSetLength(uint8_t value)
 {
 	channel_three.length_counter_setpoint = value;
-	channel_three.length_counter = channel_three.length_counter_setpoint;
-	//channel_three.length_counter = 0x100 - channel_three.length_counter_setpoint;
+	//channel_three.length_counter = channel_three.length_counter_setpoint;
+	channel_three.length_counter = 0x100u - channel_three.length_counter_setpoint;
 }
 
 void Apu::ChannelThreeSetFreq(uint8_t value)
@@ -439,11 +453,6 @@ void Apu::ChannelThreeSetVolume(uint8_t value)
 	default:
 		break;
 	}
-}
-
-uint8_t Apu::ChannelThreeGetLengthEnable()
-{
-	return channel_three.length_enable << 6;
 }
 
 // channel four
@@ -481,7 +490,11 @@ int16_t Apu::UpdateChannelFour(int16_t tcycles)
 void Apu::ChannelFourTrigger(uint8_t value)
 {
 	if (value & 0x40)
+	{
+		//if (!channel_four.length_enable && channel_four.length_counter && (channel_four.length_counter < (channel_four.length_counter_setpoint / 2)))
+		//	channel_four.length_counter--;
 		channel_four.length_enable = true;
+	}
 	else
 		channel_four.length_enable = false;
 
@@ -591,8 +604,7 @@ void Apu::FrameSeqLengthStep()
 		channel_three.length_counter--;
 		if (channel_three.length_counter == 0)
 		{
-			channel_three.length_enable = false;
-			channel_three.enable = false;
+			//channel_three.enable = false;
 			channel_three.playing = false;
 		}
 	}

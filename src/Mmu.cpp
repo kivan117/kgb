@@ -19,6 +19,7 @@
 
 Mmu::Mmu(Apu* __apu, Serial* __lc) : apu(__apu), linkCable(__lc)
 {
+	//memset(Memory, 0xFF, sizeof(Memory));
 	Memory[0xFF00] = 0xFF; //stub initial input to all buttons released
 }
 
@@ -102,6 +103,9 @@ void Mmu::Tick(uint16_t cycles)
 		}
 	}
 
+	if (rumbleActive)
+		rumbleStrength += (cycles / 4);
+
 	//DMG DMA
 	if (!DMAInProgress)
 		return;
@@ -155,7 +159,11 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 	}
 	if (addr < 0xA000) //VRAM
 	{
-		return VRAM[currentVRAMBank][addr & 0x1FFF];
+		if (currentPPUMode != 3)
+			return VRAM[currentVRAMBank][addr & 0x1FFF];
+		else
+			std::cout << "Error: Read from VRAM during Mode 3" << std::endl;
+		return 0xFF;
 	}
 	if (addr > 0x9FFF && addr < 0xC000) //external cartridge ram (possibly banked)
 	{
@@ -280,10 +288,6 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 		case(0xFF1D):
 			return 0xFF;
 		case(0xFF1E):
-			if (apu)
-			{
-				return apu->ChannelThreeGetLengthEnable() | 0xBF;
-			}
 			return Memory[addr] | 0xBF;
 		case(0xFF1F):
 			return 0xFF;
@@ -337,6 +341,16 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 		}
 	}
 
+	if (addr == 0xFF40)
+	{
+		return Memory[addr];
+	}
+
+	if (addr == 0xFF41)
+	{
+		return Memory[addr];
+	}
+
 	if (addr == 0xFF69) //read CGB BGPD
 	{
 		return cgb_BGP[Memory[0xFF68] & 0x3F];
@@ -378,7 +392,10 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 
 	if (addr > 0x7FFF && addr < 0xA000) //VRAM
 	{
-		VRAM[currentVRAMBank][addr & 0x1FFF] = val;
+		if (currentPPUMode != 3)
+			VRAM[currentVRAMBank][addr & 0x1FFF] = val;
+		else
+			std::cout << "Error: write to VRAM during Mode 3" << std::endl;
 		return;
 	}
 
@@ -483,7 +500,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 			}
 			return;
 		}
-		if (((apu->GetAudioEnable() & 0x80) != 0x80) && val != 0x00)
+		if (!apu || (((apu->GetAudioEnable() & 0x80) != 0x80) && val != 0x00))
 			return;
 		switch (addr)
 		{
@@ -615,6 +632,13 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		return;
 	}
 
+	if (addr == 0xFF40)
+	{
+		Memory[0xFF40] = val;
+		return;
+	}
+
+
 	if (addr == 0xFF41) //lcd stat
 	{
 		Memory[0xFF41] = (val & 0xF8) | (Memory[0xFF41] & 0x07); //mask off the bottom 3 bits which are read only
@@ -653,7 +677,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		if (bootRomEnabled && (val & 0x01))
 		{
 			bootRomEnabled = false;
-			Memory[0xFF50] = 0x01;
+			Memory[0xFF50] = 0xFF;
 
 			//if (cgbMode && (!cgbSupport))
 			//{
@@ -663,25 +687,31 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 		return;
 	}
 
-	if (addr == 0xFF52) //HDMA Src Addr Low Byte
+	if (addr == 0xFF51) //HDMA1 Src Addr High Byte
+	{
+		Memory[0xFF51] = val;
+		return;
+	}
+
+	if (addr == 0xFF52) //HDMA2 Src Addr Low Byte
 	{
 		Memory[0xFF52] = val & 0xF0;
 		return;
 	}
 
-	if (addr == 0xFF53) //HDMA Dest High Byte
+	if (addr == 0xFF53) //HDMA3 Dest High Byte
 	{
 		Memory[0xFF53] = val & 0x1F;
 		return;
 	}
 
-	if (addr == 0xFF54) //HDMA Dest Low Byte
+	if (addr == 0xFF54) //HDMA4 Dest Low Byte
 	{
 		Memory[0xFF54] = val & 0xF0;
 		return;
 	}
 
-	if (addr == 0xFF55) //TODO: HDMA Transfer Start/Stop
+	if (addr == 0xFF55) //HDMA5 start/stop/length
 	{
 		//Memory[0xFF55] = val;
 		if (val & 0x80) //start h-blank dma
@@ -710,7 +740,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 
 				uint16_t length = ((val & 0x7F) + 1) << 4;
 
-				for (int i = 0; i < length; i++)
+				for (uint16_t i = 0; i < length; i++)
 				{
 					VRAM[currentVRAMBank][dest + i] = ReadByteDirect(src + i);
 				}
@@ -957,7 +987,7 @@ void Mmu::DoHDMATransfer()
 	uint16_t bytesLeft = HDMALength - HDMATransferredTotal;
 	HDMATransferredThisLine = 0;
 
-	if (bytesLeft)
+	if (bytesLeft > 0)
 	{
 		for (int i = 0; i < 16; i++)
 		{
@@ -1020,13 +1050,17 @@ void Mmu::ParseRomHeader(const std::string& romFileName)
 	case(0x12):
 		currentMBC = MBC_TYPE::MBC3;
 		break;
-	case(0x1B):
 	case(0x1E):
+		hasRumble = true;
+	case(0x1B):
 		hasSaveBattery = true;
-	case(0x19):
-	case(0x1A):
+		currentMBC = MBC_TYPE::MBC5;
+		break;
 	case(0x1C):
 	case(0x1D):
+		hasRumble = true;
+	case(0x19):
+	case(0x1A):
 		currentMBC = MBC_TYPE::MBC5;
 		break;
 	default:
@@ -1485,6 +1519,12 @@ void Mmu::WriteMBC5(uint16_t addr, uint8_t val)
 	if (addr < 0x6000) //ram bank select
 	{
 		currentRamBank = val & 0x0F;
+
+		if (hasRumble)
+		{
+			rumbleActive = ((val & 0x08) != 0) ? true : false;
+			currentRamBank &= 0x07;
+		}
 	}
 	return;
 }

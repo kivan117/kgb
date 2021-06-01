@@ -76,8 +76,12 @@ void Ppu::Tick(uint16_t cycles)
 	}
 	case(1): //vblank
 	{
-		//if (currentLine == 153 && PpuCycles >= 4) //some weird bug. not implementing for now.
-		//	currentLine = 0;
+		//if (currentLine == 153 && PpuCycles >= 4 && !lastLineBugTriggered)
+		//{
+		//	lastLineBugTriggered = true;
+		//	statIntAvail = true;
+		//	mmu->WriteByteDirect(0xFF44, 0);
+		//}
 
 		if (PpuCycles >= 456)
 		{
@@ -211,7 +215,22 @@ void Ppu::SetMode(uint8_t mode)
 
 void Ppu::SetLine(uint8_t line)
 {
+	uint8_t stat = mmu->ReadByteDirect(0xFF41);
+	uint8_t ly = mmu->ReadByteDirect(0xFF44);
+	uint8_t lyc = mmu->ReadByteDirect(0xFF45);
 	statIntAvail = true;
+
+	if((stat & STAT_LYC_ENABLE) && (ly == lyc))
+		statIntAvail = false;
+
+	if ((stat & STAT_OAM_ENABLE) && (currentMode == 2))
+		statIntAvail = false;
+
+	if ((stat & STAT_VBLANK_ENABLE) && (currentMode == 1))
+		statIntAvail = false;
+
+	if ((stat & STAT_HBLANK_ENABLE) && (currentMode == 0))
+		statIntAvail = false;
 
 	if (line > 153)
 	{
