@@ -26,15 +26,19 @@ public:
 	stopwatch::Stopwatch title_timer;
 	std::stringstream titlestream;
 	uint64_t frame_mus, average_frame_mus = 1;
+	uint64_t average_cycles_per_frame[60] = { 0 };
+	uint8_t avg_cycles_index = 0;
+	uint64_t avg_cycles = 0;
 	uint64_t running_frame_times[60] = { 0 };
 	uint8_t frame_time_index = 0;
 	uint64_t audio_frames_requested{ 0 };
+
+	SDL_AudioDeviceID audio_device;
 private:
 	Mmu* mmu;
 	Ppu* ppu;
 
 	SDL_AudioSpec audio_spec;
-	SDL_AudioDeviceID audio_device;
 
 	void Execute(uint8_t op);
 

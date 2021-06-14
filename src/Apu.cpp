@@ -27,7 +27,7 @@ void Apu::Update(uint64_t tcycles, bool doubleSpeedMode)
 		uint16_t updateLength = doubleSpeedMode ? 2 : 4;
 
 		int16_t channel_out[4] = {0,0,0,0};
-		
+
 		if(!MuteAll)
 		{
 			channel_out[0] = UpdateChannelOne(updateLength);

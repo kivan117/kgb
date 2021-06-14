@@ -235,10 +235,14 @@ int main(int argc, char* argv[])
 		else
 		{
 			static double carry_time = 0;
-			int samples_ready = SDL_AudioStreamAvailable(apu->audio_stream);
-			if (samples_ready < cpu->audio_frames_requested)
+			
+			//int samples_ready = SDL_AudioStreamAvailable(apu->audio_stream);
+			//if (samples_ready < cpu->audio_frames_requested)
+			SDL_LockAudioDevice(cpu->audio_device);
+			if(cpu->audio_frames_requested > 0)
 			{
-				int cpu_ticks = cpu->audio_frames_requested - samples_ready; //audio frames requested
+				unsigned int cpu_ticks = cpu->audio_frames_requested;// -samples_ready; //audio frames requested
+				cpu->audio_frames_requested = 0;
 				double accurate_ticks;
 				if (cpu->GetDoubleSpeedMode())
 					accurate_ticks = (double)cpu_ticks * cpu->GetThrottle() * ((double)0x800000 / (double)48000) + carry_time;
@@ -247,7 +251,7 @@ int main(int argc, char* argv[])
 
 
 				uint64_t pre_update_cpu_cycles = cpu->GetTotalCycles();
-
+				
 				while ((cpu->GetTotalCycles() - pre_update_cpu_cycles) < accurate_ticks) //tick emulator forward and fill audio buffer
 				{
 					uint64_t tick_cycles = cpu->GetTotalCycles();
@@ -256,31 +260,43 @@ int main(int argc, char* argv[])
 
 					cpu->apu->Update(tick_cycles, cpu->GetDoubleSpeedMode());
 				}
+				
 
 				carry_time = (cpu->GetTotalCycles() - pre_update_cpu_cycles) - accurate_ticks;
 				cpu->frame_mus = cpu->watch.elapsed<stopwatch::mus>();
 				cpu->running_frame_times[cpu->frame_time_index] = cpu->frame_mus;
 				cpu->frame_time_index = (cpu->frame_time_index + 1) % 60;
+				
+				cpu->average_cycles_per_frame[cpu->avg_cycles_index] = cpu->GetTotalCycles() - pre_update_cpu_cycles;
+				cpu->avg_cycles_index = (cpu->avg_cycles_index + 1) % 60;
+				
 				if (cpu->title_timer.elapsed<stopwatch::ms>() > 200)
 				{
 					cpu->average_frame_mus = 0;
 					for (int i = 0; i < 60; i++)
 						cpu->average_frame_mus += cpu->running_frame_times[i];
 					cpu->average_frame_mus = cpu->average_frame_mus / 60;
+
+					cpu->avg_cycles = 0;
+					for (int i = 0; i < 60; i++)
+						cpu->avg_cycles += cpu->average_cycles_per_frame[i];
+					cpu->avg_cycles = cpu->avg_cycles / 60;
+
 					cpu->title_timer.start();
 
-					double fps = ((double)(cpu->GetTotalCycles() - pre_update_cpu_cycles) * 1000000.0) / (((double)cpu->average_frame_mus) * 70224.0);
+					//double fps = ((double)(cpu->GetTotalCycles() - pre_update_cpu_cycles) * 1000000.0) / (70224.0 * ((double)cpu->average_frame_mus));
+					double fps = ((double)(cpu->avg_cycles) * 1000000.0) / (70224.0 * ((double)cpu->average_frame_mus));
 					if (cpu->GetDoubleSpeedMode())
 						fps *= 0.5;
 					cpu->titlestream.str(std::string());
-					cpu->titlestream.precision(4);// << std::setprecision(4);
+					//cpu->titlestream.precision(4);// << std::setprecision(4);
 					cpu->titlestream << "KGB    FPS: ";
 					cpu->titlestream << fps;
 				}
 				cpu->watch.start();
 
-
 			}
+			SDL_UnlockAudioDevice(cpu->audio_device);
 		}
 		
 		if (cpu->GetFrameCycles() > (456 * 154) * mmu->DMASpeed)
@@ -314,6 +330,27 @@ int main(int argc, char* argv[])
 				case(SDL_QUIT):
 				{
 					userQuit = true;
+					break;
+				}
+				case(SDL_WINDOWEVENT):
+				{
+					switch (e.window.event)
+					{
+					case(SDL_WINDOWEVENT_MOVED):
+					{
+						if (cpu->apu)
+						{
+							SDL_LockAudioDevice(cpu->audio_device);
+							SDL_AudioStreamClear(cpu->apu->audio_stream);
+							SDL_ClearQueuedAudio(cpu->audio_device);
+							cpu->audio_frames_requested = 0;
+							SDL_UnlockAudioDevice(cpu->audio_device);
+						}
+						break;
+					}
+					default:
+						break;
+					}
 					break;
 				}
 				case(SDL_KEYDOWN):

@@ -38,6 +38,9 @@ private:
 	const uint8_t STAT_LYC_ENABLE{ 0x40 };
 
 	bool statIntAvail{ true };
+	bool lastLineBugTriggered{ false };
+
+	bool StatIntAvail();
 
 	void SetMode(uint8_t mode);
 	void SetLine(uint8_t line);

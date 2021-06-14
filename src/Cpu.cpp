@@ -5,8 +5,6 @@
 
 #include <fstream>
 
-
-
 void audio_callback(void* user, Uint8* stream, int len) {
 	Cpu* cpu = (Cpu*)user;
 	if (!cpu)
@@ -25,7 +23,7 @@ void audio_callback(void* user, Uint8* stream, int len) {
 		}
 		return;
 	}
-	cpu->audio_frames_requested = len;
+	cpu->audio_frames_requested += len / 4;
 	SDL_AudioStreamGet(cpu->apu->audio_stream, stream, len); //copy audio buffer to audio output
 	if (std::floor(cpu->GetThrottle()) > 1)
 	{

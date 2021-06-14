@@ -22,6 +22,8 @@ Ppu::Ppu(Mmu* __mmu, SDL_Texture* tex, SDL_Renderer* rend) : mmu(__mmu), ppuText
 
 void Ppu::Tick(uint16_t cycles)
 {
+	statIntAvail = StatIntAvail(); //TODO:this naming is horrible. stop it.
+
 	uint8_t lcdc = mmu->ReadByteDirect(0xFF40);
 	uint8_t stat = mmu->ReadByteDirect(0xFF41);
 
@@ -41,10 +43,10 @@ void Ppu::Tick(uint16_t cycles)
 			memset(FrameBuffer, 0x00, sizeof(FrameBuffer));
 			newFrame = true;
 		}
-		if(currentMode != 0)
-			SetMode(0);
 		if (currentLine != 0)
 			SetLine(0);
+		if (currentMode != 0)
+			SetMode(0);
 		return;
 	}
 
@@ -76,12 +78,12 @@ void Ppu::Tick(uint16_t cycles)
 	}
 	case(1): //vblank
 	{
-		//if (currentLine == 153 && PpuCycles >= 4 && !lastLineBugTriggered)
-		//{
-		//	lastLineBugTriggered = true;
-		//	statIntAvail = true;
-		//	mmu->WriteByteDirect(0xFF44, 0);
-		//}
+		if (currentLine == 153 && PpuCycles >= 4 && !lastLineBugTriggered)
+		{
+			lastLineBugTriggered = true;
+			statIntAvail = true;
+			mmu->WriteByteDirect(0xFF44, 0); //improperly report LY as 0 on line 153 after 4 cycles
+		}
 
 		if (PpuCycles >= 456)
 		{
@@ -118,9 +120,29 @@ void Ppu::Tick(uint16_t cycles)
 		break;
 	}
 
-	CheckLYC();
+	if(currentLine != 0) //obscure behavior, LY=LYC cannot trigger if Line is 0
+		CheckLYC();
 
 	return;
+}
+
+bool Ppu::StatIntAvail()
+{
+	uint8_t stat = mmu->ReadByteDirect(0xFF41);
+	uint8_t ly = mmu->ReadByteDirect(0xFF44);
+	uint8_t lyc = mmu->ReadByteDirect(0xFF45);
+	
+	//const uint8_t STAT_HBLANK_ENABLE{ 0x08 };
+	//const uint8_t STAT_VBLANK_ENABLE{ 0x10 };
+	//const uint8_t STAT_OAM_ENABLE{ 0x20 };
+	//const uint8_t STAT_LYC_ENABLE{ 0x40 };
+
+	bool irq_signal =	((stat & STAT_HBLANK_ENABLE) && currentMode == 0) ||
+						((stat & STAT_VBLANK_ENABLE) && currentMode == 1) ||
+						((stat & STAT_OAM_ENABLE)    && currentMode == 2) ||
+						((stat & STAT_LYC_ENABLE)    && (ly == lyc) && (currentLine != 0));
+
+	return !irq_signal;
 }
 
 void Ppu::SetMode(uint8_t mode)
@@ -187,6 +209,8 @@ void Ppu::SetMode(uint8_t mode)
 	}
 	case(2): //enter oam search
 	{
+		lastLineBugTriggered = false;
+
 		SpriteSearch();
 
 		if ((stat & STAT_OAM_ENABLE) && statIntAvail)
@@ -220,17 +244,6 @@ void Ppu::SetLine(uint8_t line)
 	uint8_t lyc = mmu->ReadByteDirect(0xFF45);
 	statIntAvail = true;
 
-	if((stat & STAT_LYC_ENABLE) && (ly == lyc))
-		statIntAvail = false;
-
-	if ((stat & STAT_OAM_ENABLE) && (currentMode == 2))
-		statIntAvail = false;
-
-	if ((stat & STAT_VBLANK_ENABLE) && (currentMode == 1))
-		statIntAvail = false;
-
-	if ((stat & STAT_HBLANK_ENABLE) && (currentMode == 0))
-		statIntAvail = false;
 
 	if (line > 153)
 	{
