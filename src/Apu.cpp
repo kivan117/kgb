@@ -9,6 +9,9 @@ Apu::Apu()
 	audio_spec.format = AUDIO_S16;
 	audio_spec.channels = 2;
 	audio_stream = SDL_NewAudioStream(AUDIO_S16, 2, 2097152, AUDIO_S16, 2, 48000);
+
+	SetAudioEnable(false);
+
 }
 
 void Apu::ToggleMute()

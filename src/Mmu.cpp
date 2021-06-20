@@ -159,11 +159,11 @@ uint8_t Mmu::ReadByteDirect(uint16_t addr)
 	}
 	if (addr < 0xA000) //VRAM
 	{
-		if (currentPPUMode != 3)
+		//if (currentPPUMode != 3)
 			return VRAM[currentVRAMBank][addr & 0x1FFF];
-		else
-			std::cout << "Error: Read from VRAM during Mode 3" << std::endl;
-		return 0xFF;
+		//else
+		//	std::cout << "Error: Read from VRAM during Mode 3" << std::endl;
+		//return 0xFF;
 	}
 	if (addr > 0x9FFF && addr < 0xC000) //external cartridge ram (possibly banked)
 	{
@@ -392,11 +392,11 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 
 	if (addr > 0x7FFF && addr < 0xA000) //VRAM
 	{
-		if (currentPPUMode != 3)
+		//if (currentPPUMode != 3)
 			VRAM[currentVRAMBank][addr & 0x1FFF] = val;
-		else
-			std::cout << "Error: write to VRAM during Mode 3" << std::endl;
-		return;
+		//else
+		//	std::cout << "Error: write to VRAM during Mode 3" << std::endl;
+		//return;
 	}
 
 	if (addr > 0xBFFF && addr < 0xD000) //WRAM bank 0
@@ -453,7 +453,7 @@ void Mmu::WriteByte(uint16_t addr, uint8_t val)
 			}
 			else
 			{
-				std::cout << (char)Memory[0xFF01] << std::flush;
+				//std::cout << (char)Memory[0xFF01] << std::flush;
 				Memory[0xFF01] = 0xFF;
 			}
 		}
