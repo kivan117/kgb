@@ -6,7 +6,7 @@
 #include <vector>
 #include <cassert>
 #include <algorithm>
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #include "Mmu.h"
 #include "Cpu.h"
 #include "Ppu.h"
@@ -355,6 +355,9 @@ int main(int argc, char* argv[])
 				}
 				case(SDL_KEYDOWN):
 				{
+					uint8_t ifreg = mmu->ReadByteDirect(0xFF0F);
+					if (mmu->ReadByteDirect(0xFF00) & (0x10 || 0x20))
+						mmu->WriteByteDirect(0xFF0F, ifreg | 0x10);
 					switch (e.key.keysym.scancode)
 					{
 					case SDL_SCANCODE_W:
@@ -471,6 +474,9 @@ int main(int argc, char* argv[])
 				}
 				case(SDL_CONTROLLERBUTTONDOWN):
 				{
+					uint8_t ifreg = mmu->ReadByteDirect(0xFF0F);
+					if (mmu->ReadByteDirect(0xFF00) & (0x10 || 0x20))
+						mmu->WriteByteDirect(0xFF0F, ifreg | 0x10);
 					switch (e.cbutton.button)
 					{
 					case(SDL_CONTROLLER_BUTTON_A):

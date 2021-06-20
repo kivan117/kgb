@@ -24,7 +24,16 @@ void audio_callback(void* user, Uint8* stream, int len) {
 		return;
 	}
 	cpu->audio_frames_requested += len / 4;
-	SDL_AudioStreamGet(cpu->apu->audio_stream, stream, len); //copy audio buffer to audio output
+	uint64_t convertedBytesAvail = SDL_AudioStreamAvailable(cpu->apu->audio_stream);
+	if(convertedBytesAvail >= len)
+		SDL_AudioStreamGet(cpu->apu->audio_stream, stream, len); //copy audio buffer to audio output
+	else
+	{
+		SDL_AudioStreamGet(cpu->apu->audio_stream, stream, convertedBytesAvail);
+		for (int i = convertedBytesAvail; i < len; i++)
+			stream[i] = stream[convertedBytesAvail - 1];
+	}
+
 	if (std::floor(cpu->GetThrottle()) > 1)
 	{
 		uint8_t* trash = new uint8_t[len];
@@ -48,6 +57,8 @@ Cpu::Cpu(Mmu* __mmu, Ppu* __ppu, Apu* __apu) : mmu(__mmu), ppu(__ppu), apu(__apu
 		audio_spec.callback = audio_callback;
 		audio_device = SDL_OpenAudioDevice(NULL, 0, &audio_spec, NULL, 0);
 		SDL_PauseAudioDevice(audio_device, 0);
+
+		apu->SetAudioEnable(false);
 	}
 
 	if (!mmu->isBootRomEnabled()) //fake it til you make it
