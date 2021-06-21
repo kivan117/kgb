@@ -31,6 +31,11 @@ jobs:
       # See https://docs.microsoft.com/visualstudio/msbuild/msbuild-command-line-reference
       run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
 
+    - name: Move Controller DB
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      # Copy the steam controller db file from the main repo directory to the build artifact folder
+      run: copy gamecontrollerdb.txt x64/Release/bin/gamecontrollerdb.txt
+
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v2.2.2
       with:
